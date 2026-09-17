@@ -74,7 +74,7 @@ paths:
         - name: kind
           in: query
           required: true
-          schema: { type: string, enum: [sma] }
+          schema: { type: string, enum: [sma, ema, rsi] }
         - name: window
           in: query
           required: true

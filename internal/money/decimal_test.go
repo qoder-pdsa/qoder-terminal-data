@@ -66,3 +66,40 @@ func TestPercentOf(t *testing.T) {
 		t.Errorf("PercentOf zero base = %q, want 0.0000", got)
 	}
 }
+
+func TestFromInt(t *testing.T) {
+	tests := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0.0000"},
+		{1, "1.0000"},
+		{50, "50.0000"},
+		{-3, "-3.0000"},
+	}
+	for _, tt := range tests {
+		if got := FromInt(tt.n).String(); got != tt.want {
+			t.Errorf("FromInt(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+func TestMulInt(t *testing.T) {
+	tests := []struct {
+		units int64
+		n     int64
+		want  int64
+	}{
+		{10000, 2, 20000},
+		{10000, 0, 0},
+		{10000, 1, 10000},
+		{-2500, 3, -7500},
+		{2500, -1, -2500},
+		{1, 249, 249},
+	}
+	for _, tt := range tests {
+		if got := FromUnits(tt.units).MulInt(tt.n).Units(); got != tt.want {
+			t.Errorf("FromUnits(%d).MulInt(%d) = %d, want %d", tt.units, tt.n, got, tt.want)
+		}
+	}
+}
