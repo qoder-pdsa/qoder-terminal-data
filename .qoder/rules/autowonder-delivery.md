@@ -5,12 +5,13 @@ trigger: always_on
 
 > 由 `qoder-terminal-web/scripts/sync-rules.sh` 下发，**不要在各 repo 内直接修改**。
 
-本项目由三个 repo 组成，在 AutoWonder 中由数字人流水线交付：**全栈开发 → 代码评审 → 测试与部署 → 人工验收**。
+本项目由四个 repo 组成，在 AutoWonder 中由数字人流水线交付：**全栈开发 → 代码评审 → 测试与部署 → 人工验收**。
 
 | Repo | 语言 | 维护的契约 |
 |---|---|---|
 | `qoder-terminal-data` | Go | `api/openapi.yaml` |
 | `qoder-terminal-analyst` | Python | `api/openapi.yaml`、`api/agent-event.schema.json` |
+| `qoder-terminal-user` | Java | `api/openapi.yaml`、JWT claims、Flyway 迁移脚本 |
 | `qoder-terminal-web` | TypeScript | 消费方；包含 `e2e/` |
 
 ## 统一入口
@@ -18,7 +19,8 @@ trigger: always_on
 |---|---|---|
 | `make test` | 单元测试 | DEV（改动前跑基线、改动后回归） |
 | `make lint` | 格式、静态检查、类型检查、OpenAPI 校验 | DEV、CR 核对证据 |
-| `GET /health` | 部署后健康检查（data :8081、analyst :8082） | QA |
+| `GET /health` | 部署后健康检查（data :8081、analyst :8082、user :8084） | QA |
+| user `make db-migrate` | 执行 Flyway 迁移（服务启动时不会自动迁移） | QA 数据库步骤 |
 | web `make e2e` | 部署后跨 repo 验证 | QA |
 
 ## 开发（DEV）
@@ -35,5 +37,7 @@ trigger: always_on
 - 各步骤的真实命令输出与结论写入 `evidence/`（由 AutoWonder Runtime 封存上传）。
 - 禁止编造证据；mock 数据的测试结果不能冒充部署后测试。
 
-## 不适用的 SDLC 步骤
-- **数据库变更预检 / 执行**：本系统无数据库，按“不适用”处理并在证据中说明依据。
+## 数据库变更（仅 qoder-terminal-user）
+- PostgreSQL，`qoder_user` schema；变更只能新增 Flyway 脚本，禁止修改已合入脚本。
+- 启动时自动迁移已关闭，迁移只由 QA 数据库步骤通过 `make db-migrate` 执行，执行前备份。
+- data / analyst / web 无数据库：其工作项的数据库步骤按“不适用”处理并在证据中说明依据。
