@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qoder.local/qoder-terminal-data/quote-tick.schema.json",
+  "title": "QuoteTick",
+  "description": "qoder-terminal-data 通过 WebSocket /v1/stream 推送的实时报价",
+  "type": "object",
+  "required": ["type", "symbol", "price", "asOf"],
+  "properties": {
+    "type": { "const": "quote_tick" },
+    "symbol": { "type": "string" },
+    "price": { "type": "string", "pattern": "^-?\\d+(\\.\\d+)?$" },
+    "asOf": { "type": "string", "format": "date-time" }
+  }
+}
