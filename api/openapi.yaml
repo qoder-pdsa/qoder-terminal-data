@@ -1,0 +1,175 @@
+openapi: 3.1.0
+info:
+  title: Qoder Terminal Data API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8081
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Get health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /v1/quotes/{symbol}:
+    get:
+      operationId: getQuote
+      summary: Get quote
+      parameters:
+        - $ref: "#/components/parameters/Symbol"
+      responses:
+        "200":
+          description: 最新报价
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Quote" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/history/{symbol}:
+    get:
+      operationId: getHistory
+      summary: Get history
+      parameters:
+        - $ref: "#/components/parameters/Symbol"
+        - $ref: "#/components/parameters/Range"
+      responses:
+        "200":
+          description: 日线 K 线
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Candle" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/news:
+    get:
+      operationId: listNews
+      summary: List news
+      parameters:
+        - name: symbol
+          in: query
+          description: longbridge provider 下必填
+          schema: { type: string, pattern: "^[0-9A-Z]{1,6}\\.(HK|US|SH|SZ)$" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        "200":
+          description: 新闻列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NewsItem" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/indicators/{symbol}:
+    get:
+      operationId: getIndicator
+      summary: Get indicator
+      parameters:
+        - $ref: "#/components/parameters/Symbol"
+        - name: kind
+          in: query
+          required: true
+          schema: { type: string, enum: [sma] }
+        - name: window
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 250 }
+        - $ref: "#/components/parameters/Range"
+      responses:
+        "200":
+          description: 与 history 等长的指标序列，窗口不足处 value 为 null
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IndicatorSeries" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+components:
+  parameters:
+    Range:
+      name: range
+      in: query
+      schema: { type: string, enum: ["1M", "3M", "6M", "1Y"], default: "3M" }
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[0-9A-Z]{1,6}\\.(HK|US|SH|SZ)$", example: "700.HK" }
+  responses:
+    Error:
+      description: 错误
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok] }
+    Decimal:
+      type: string
+      pattern: "^-?\\d+(\\.\\d+)?$"
+      description: 十进制数字符串，禁止使用浮点
+    Quote:
+      type: object
+      required: [symbol, price, change, changePercent, currency, asOf]
+      properties:
+        symbol: { type: string }
+        price: { $ref: "#/components/schemas/Decimal" }
+        change: { $ref: "#/components/schemas/Decimal" }
+        changePercent: { $ref: "#/components/schemas/Decimal" }
+        currency: { type: string, enum: [HKD, USD, CNY] }
+        asOf: { type: string, format: date-time }
+    Candle:
+      type: object
+      required: [time, open, high, low, close, volume]
+      properties:
+        time:
+          type: string
+          format: date-time
+          description: 交易日，以该日期的 UTC 零点表示（如 2026-09-17T00:00:00Z 即 9 月 17 日的日 K）
+        open: { $ref: "#/components/schemas/Decimal" }
+        high: { $ref: "#/components/schemas/Decimal" }
+        low: { $ref: "#/components/schemas/Decimal" }
+        close: { $ref: "#/components/schemas/Decimal" }
+        volume: { type: integer, format: int64 }
+    NewsItem:
+      type: object
+      required: [id, headline, source, url, publishedAt]
+      properties:
+        id: { type: string }
+        headline: { type: string }
+        summary: { type: string }
+        source: { type: string }
+        url: { type: string, format: uri }
+        symbols: { type: array, items: { type: string } }
+        publishedAt: { type: string, format: date-time }
+    IndicatorSeries:
+      type: object
+      required: [symbol, kind, window, points]
+      properties:
+        symbol: { type: string }
+        kind: { type: string }
+        window: { type: integer }
+        points:
+          type: array
+          items:
+            type: object
+            required: [time, value]
+            properties:
+              time: { type: string, format: date-time }
+              value:
+                oneOf:
+                  - $ref: "#/components/schemas/Decimal"
+                  - type: "null"
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
