@@ -95,7 +95,7 @@ func TestLongbridgeNewsSkipsItemsWithoutURLAndRespectsLimit(t *testing.T) {
 }
 
 func TestLongbridgeDailyCandleUsesExchangeTradingDate(t *testing.T) {
-	// Longbridge 日 K 时间戳为交易所当地零点：2026-09-17 00:00 HKT = 2026-09-16T16:00:00Z
+	// Longbridge daily candles are stamped at exchange-local midnight: 2026-09-17 00:00 HKT = 2026-09-16T16:00:00Z
 	hkMidnight := time.Date(2026, 9, 17, 0, 0, 0, 0, time.FixedZone("HKT", 8*3600))
 	lb := &Longbridge{quotes: fakeQuotes{sticks: []*quote.Candlestick{
 		{Open: dec("426.2"), High: dec("431"), Low: dec("425"), Close: dec("426"), Volume: 1, Timestamp: hkMidnight.Unix()},

@@ -3,5 +3,5 @@ extends:
 rules:
   info-license: off
   no-server-example.com: off
-  # Demo 阶段本地运行，暂不定义鉴权；上生产前需打开（见 backlog）
+  # Auth is not defined yet during the demo phase; enable before production (see backlog)
   security-defined: off

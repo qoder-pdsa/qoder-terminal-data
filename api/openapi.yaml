@@ -23,7 +23,7 @@ paths:
         - $ref: "#/components/parameters/Symbol"
       responses:
         "200":
-          description: 最新报价
+          description: Latest quote
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Quote" }
@@ -37,7 +37,7 @@ paths:
         - $ref: "#/components/parameters/Range"
       responses:
         "200":
-          description: 日线 K 线
+          description: Daily candlesticks
           content:
             application/json:
               schema:
@@ -51,14 +51,14 @@ paths:
       parameters:
         - name: symbol
           in: query
-          description: longbridge provider 下必填
+          description: Required with the longbridge provider
           schema: { type: string, pattern: "^[0-9A-Z]{1,6}\\.(HK|US|SH|SZ)$" }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
       responses:
         "200":
-          description: 新闻列表
+          description: News items
           content:
             application/json:
               schema:
@@ -82,7 +82,7 @@ paths:
         - $ref: "#/components/parameters/Range"
       responses:
         "200":
-          description: 与 history 等长的指标序列，窗口不足处 value 为 null
+          description: Indicator series aligned with history; value is null until the window is filled
           content:
             application/json:
               schema: { $ref: "#/components/schemas/IndicatorSeries" }
@@ -101,7 +101,7 @@ components:
       schema: { type: string, pattern: "^[0-9A-Z]{1,6}\\.(HK|US|SH|SZ)$", example: "700.HK" }
   responses:
     Error:
-      description: 错误
+      description: Error
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -114,7 +114,7 @@ components:
     Decimal:
       type: string
       pattern: "^-?\\d+(\\.\\d+)?$"
-      description: 十进制数字符串，禁止使用浮点
+      description: Decimal number encoded as a string; floats are not allowed
     Quote:
       type: object
       required: [symbol, price, change, changePercent, currency, asOf]
@@ -132,7 +132,7 @@ components:
         time:
           type: string
           format: date-time
-          description: 交易日，以该日期的 UTC 零点表示（如 2026-09-17T00:00:00Z 即 9 月 17 日的日 K）
+          description: Trading day expressed as UTC midnight of that date (e.g. 2026-09-17T00:00:00Z is the Sep 17 daily candle)
         open: { $ref: "#/components/schemas/Decimal" }
         high: { $ref: "#/components/schemas/Decimal" }
         low: { $ref: "#/components/schemas/Decimal" }

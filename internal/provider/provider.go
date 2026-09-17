@@ -1,4 +1,4 @@
-// Package provider 定义行情数据源接口。
+// Package provider defines the market data source interface.
 package provider
 
 import (
@@ -10,10 +10,10 @@ import (
 	"github.com/qoder-pdsa/qoder-terminal-data/internal/money"
 )
 
-// ErrNotFound 表示标的不存在。
+// ErrNotFound means the symbol does not exist.
 var ErrNotFound = errors.New("symbol not found")
 
-// CurrencyOf 根据标的市场后缀推断计价货币，如 700.HK → HKD。
+// CurrencyOf infers the quote currency from the market suffix, e.g. 700.HK → HKD.
 func CurrencyOf(symbol string) string {
 	switch {
 	case strings.HasSuffix(symbol, ".HK"):
@@ -25,7 +25,7 @@ func CurrencyOf(symbol string) string {
 	}
 }
 
-// Quote 最新报价。
+// Quote is the latest quote.
 type Quote struct {
 	Symbol        string
 	Price         money.Decimal
@@ -35,14 +35,14 @@ type Quote struct {
 	AsOf          time.Time
 }
 
-// Candle 日线。
+// Candle is a daily candlestick.
 type Candle struct {
 	Time                   time.Time
 	Open, High, Low, Close money.Decimal
 	Volume                 int64
 }
 
-// NewsItem 新闻条目。
+// NewsItem is a news entry.
 type NewsItem struct {
 	ID          string
 	Headline    string
@@ -53,7 +53,7 @@ type NewsItem struct {
 	PublishedAt time.Time
 }
 
-// Provider 是所有数据源必须实现的接口。
+// Provider is the interface every data source must implement.
 type Provider interface {
 	Quote(ctx context.Context, symbol string) (Quote, error)
 	History(ctx context.Context, symbol string, days int) ([]Candle, error)

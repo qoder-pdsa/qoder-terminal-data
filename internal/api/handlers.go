@@ -1,4 +1,4 @@
-// Package api 实现 data.v1 契约的 HTTP 层。
+// Package api implements the HTTP layer of the data.v1 contract.
 package api
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/qoder-pdsa/qoder-terminal-data/internal/provider"
 )
 
-// symbolPattern 与 api/openapi.yaml 中 Symbol 参数一致，如 700.HK、AAPL.US。
+// symbolPattern matches the Symbol parameter in api/openapi.yaml, e.g. 700.HK or AAPL.US.
 var symbolPattern = regexp.MustCompile(`^[0-9A-Z]{1,6}\.(HK|US|SH|SZ)$`)
 
 const symbolHint = "symbol must look like 700.HK"
@@ -24,13 +24,13 @@ const maxIndicatorWindow = 250
 
 var rangeDays = map[string]int{"1M": 21, "3M": 63, "6M": 126, "1Y": 252}
 
-// Server 持有依赖。
+// Server holds the handler dependencies.
 type Server struct {
 	Provider provider.Provider
 	Log      *slog.Logger
 }
 
-// Routes 注册所有路由。
+// Routes registers all routes.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
@@ -159,7 +159,7 @@ func (s *Server) indicator(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"symbol": symbol, "kind": "sma", "window": window, "points": points})
 }
 
-// days 把 range 参数转换为交易日数量，缺省为 3M。
+// days converts the range parameter to a number of trading days, defaulting to 3M.
 func (s *Server) days(w http.ResponseWriter, rng string) (int, bool) {
 	if rng == "" {
 		rng = "3M"
@@ -203,7 +203,7 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]string{"code": code, "message": message})
 }
 
-// withCORS 允许本地终端前端跨域访问（仅 demo 用途）。
+// withCORS allows cross-origin access from the local terminal frontend (demo only).
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
