@@ -9,22 +9,22 @@ import (
 	"github.com/qoder-pdsa/qoder-terminal-data/internal/money"
 )
 
-// Mock 生成确定性假数据：同一标的、同一天结果总是相同，保证测试与离线演示稳定。
+// Mock generates deterministic fake data: the same symbol on the same day always yields the same result, keeping tests and offline demos stable.
 type Mock struct {
 	Now func() time.Time
 }
 
-// NewMock 创建使用真实时钟的 mock provider。
+// NewMock creates a mock provider that uses the real clock.
 func NewMock() *Mock { return &Mock{Now: time.Now} }
 
-// knownSymbols 演示用港股标的。
+// knownSymbols lists the Hong Kong symbols used in the demo.
 var knownSymbols = map[string]string{
-	"700.HK":  "腾讯控股",
-	"9988.HK": "阿里巴巴",
-	"3690.HK": "美团",
-	"1810.HK": "小米集团",
-	"1211.HK": "比亚迪股份",
-	"2800.HK": "盈富基金",
+	"700.HK":  "Tencent",
+	"9988.HK": "Alibaba",
+	"3690.HK": "Meituan",
+	"1810.HK": "Xiaomi",
+	"1211.HK": "BYD",
+	"2800.HK": "Tracker Fund",
 }
 
 var newsRotation = []string{"700.HK", "9988.HK", "3690.HK", "1810.HK"}
@@ -35,7 +35,7 @@ func seed(symbol string) int64 {
 	return int64(h.Sum64() % 1_000_000)
 }
 
-// closeUnits 返回第 dayOffset 天（0 = 今天）的收盘价最小单位，范围约 30~570。
+// closeUnits returns the close price in minimal units for dayOffset (0 = today), roughly 30~570.
 func closeUnits(symbol string, dayOffset int) int64 {
 	s := seed(symbol)
 	base := 500_000 + s*5 // 50.0000 ~ 550.0000
@@ -50,7 +50,7 @@ func (m *Mock) ensure(symbol string) error {
 	return nil
 }
 
-// Quote 实现 Provider。
+// Quote implements Provider.
 func (m *Mock) Quote(_ context.Context, symbol string) (Quote, error) {
 	if err := m.ensure(symbol); err != nil {
 		return Quote{}, err
@@ -68,7 +68,7 @@ func (m *Mock) Quote(_ context.Context, symbol string) (Quote, error) {
 	}, nil
 }
 
-// History 实现 Provider，按时间升序返回。
+// History implements Provider, returning candles in ascending time order.
 func (m *Mock) History(_ context.Context, symbol string, days int) ([]Candle, error) {
 	if err := m.ensure(symbol); err != nil {
 		return nil, err
@@ -91,7 +91,7 @@ func (m *Mock) History(_ context.Context, symbol string, days int) ([]Candle, er
 	return candles, nil
 }
 
-// News 实现 Provider。symbol 为空时返回全市场新闻。
+// News implements Provider. An empty symbol returns market-wide news.
 func (m *Mock) News(_ context.Context, symbol string, limit int) ([]NewsItem, error) {
 	if symbol != "" {
 		if err := m.ensure(symbol); err != nil {
@@ -107,7 +107,7 @@ func (m *Mock) News(_ context.Context, symbol string, limit int) ([]NewsItem, er
 		}
 		items = append(items, NewsItem{
 			ID:          fmt.Sprintf("mock-%s-%d", sym, i),
-			Headline:    fmt.Sprintf("[MOCK] %s 新闻 #%d", knownSymbols[sym], i+1),
+			Headline:    fmt.Sprintf("[MOCK] %s news #%d", knownSymbols[sym], i+1),
 			Summary:     "Mock news item for offline demo.",
 			Source:      "Qoder Mock Wire",
 			URL:         fmt.Sprintf("https://example.com/news/%s/%d", sym, i),

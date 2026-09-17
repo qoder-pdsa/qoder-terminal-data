@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	_ "time/tzdata" // distroless 镜像没有时区库，内嵌以支持 America/New_York
+	_ "time/tzdata" // distroless images ship no tz database; embed it to support America/New_York
 
 	"github.com/longbridge/openapi-go/config"
 	"github.com/longbridge/openapi-go/content"
@@ -16,29 +16,29 @@ import (
 	"github.com/qoder-pdsa/qoder-terminal-data/internal/money"
 )
 
-// maxCandles 是 Longbridge 单次 K 线请求上限。
+// maxCandles is the Longbridge limit for a single candlestick request.
 const maxCandles = 1000
 
-// quoteAPI 是 Longbridge QuoteContext 中本服务用到的子集，便于测试替换。
+// quoteAPI is the subset of Longbridge QuoteContext used by this service, so tests can substitute it.
 type quoteAPI interface {
 	Quote(ctx context.Context, symbols []string) ([]*quote.SecurityQuote, error)
 	Candlesticks(ctx context.Context, symbol string, period quote.Period, count int32, adjust quote.AdjustType) ([]*quote.Candlestick, error)
 }
 
-// newsAPI 是 Longbridge ContentContext 中本服务用到的子集。
+// newsAPI is the subset of Longbridge ContentContext used by this service.
 type newsAPI interface {
 	News(ctx context.Context, symbol string) ([]*content.NewsItem, error)
 }
 
-// Longbridge 通过 Longbridge OpenAPI 获取真实行情。
+// Longbridge fetches live market data from Longbridge OpenAPI.
 type Longbridge struct {
 	quotes quoteAPI
 	news   newsAPI
 	close  func() error
 }
 
-// NewLongbridge 从环境变量（LONGBRIDGE_APP_KEY / APP_SECRET / ACCESS_TOKEN）创建 provider。
-// 调用方负责在退出时调用 Close。
+// NewLongbridge creates the provider from environment variables (LONGBRIDGE_APP_KEY / APP_SECRET / ACCESS_TOKEN).
+// Callers must call Close on shutdown.
 func NewLongbridge() (*Longbridge, error) {
 	cfg, err := config.New()
 	if err != nil {
@@ -56,7 +56,7 @@ func NewLongbridge() (*Longbridge, error) {
 	return &Longbridge{quotes: qc, news: cc, close: qc.Close}, nil
 }
 
-// Close 释放长连接。
+// Close releases the long-lived connection.
 func (l *Longbridge) Close() error {
 	if l.close == nil {
 		return nil
@@ -64,7 +64,7 @@ func (l *Longbridge) Close() error {
 	return l.close()
 }
 
-// Quote 实现 Provider。
+// Quote implements Provider.
 func (l *Longbridge) Quote(ctx context.Context, symbol string) (Quote, error) {
 	quotes, err := l.quotes.Quote(ctx, []string{symbol})
 	if err != nil {
@@ -93,7 +93,7 @@ func (l *Longbridge) Quote(ctx context.Context, symbol string) (Quote, error) {
 	}, nil
 }
 
-// History 实现 Provider，返回前复权日线，按时间升序。
+// History implements Provider, returning forward-adjusted daily candles in ascending time order.
 func (l *Longbridge) History(ctx context.Context, symbol string, days int) ([]Candle, error) {
 	count := min(days, maxCandles)
 	sticks, err := l.quotes.Candlesticks(ctx, symbol, quote.PeriodDay, int32(count), quote.AdjustTypeForward)
@@ -115,7 +115,7 @@ func (l *Longbridge) History(ctx context.Context, symbol string, days int) ([]Ca
 	return candles, nil
 }
 
-// News 实现 Provider。Longbridge 资讯按标的查询，symbol 为空时返回 ErrSymbolRequired。
+// News implements Provider. Longbridge news is queried per symbol, so an empty symbol returns ErrSymbolRequired.
 func (l *Longbridge) News(ctx context.Context, symbol string, limit int) ([]NewsItem, error) {
 	if symbol == "" {
 		return nil, ErrSymbolRequired
@@ -145,7 +145,7 @@ func (l *Longbridge) News(ctx context.Context, symbol string, limit int) ([]News
 	return items, nil
 }
 
-// ErrSymbolRequired 表示数据源不支持全市场查询，必须指定标的。
+// ErrSymbolRequired means the provider cannot query the whole market and needs a symbol.
 var ErrSymbolRequired = errors.New("symbol is required by this provider")
 
 func toMoney(d *decimal.Decimal) (money.Decimal, error) {
@@ -155,18 +155,18 @@ func toMoney(d *decimal.Decimal) (money.Decimal, error) {
 	return money.Parse(d.String())
 }
 
-// exchangeLocation 返回标的所属交易所时区。
+// exchangeLocation returns the time zone of the symbol's exchange.
 func exchangeLocation(symbol string) *time.Location {
 	if strings.HasSuffix(symbol, ".US") {
 		if loc, err := time.LoadLocation("America/New_York"); err == nil {
 			return loc
 		}
 	}
-	return time.FixedZone("UTC+8", 8*3600) // 港股与 A 股均为 UTC+8，无夏令时
+	return time.FixedZone("UTC+8", 8*3600) // Hong Kong and mainland A-shares are UTC+8 with no DST
 }
 
-// tradingDate 把交易所当地时间戳转换为“交易日的 UTC 零点”，与 mock provider 语义一致。
-// Longbridge 日 K 的时间戳是当地零点，直接转 UTC 会让日期提前一天。
+// tradingDate converts an exchange-local timestamp to "UTC midnight of the trading day", matching the mock provider.
+// Longbridge daily candles are stamped at local midnight, so converting straight to UTC shifts the date back a day.
 func tradingDate(unix int64, loc *time.Location) time.Time {
 	y, m, d := time.Unix(unix, 0).In(loc).Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)

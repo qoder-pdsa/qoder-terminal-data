@@ -1,4 +1,4 @@
-// Package money 提供定点十进制数，避免浮点误差。
+// Package money provides fixed-point decimals to avoid floating-point errors.
 package money
 
 import (
@@ -7,18 +7,18 @@ import (
 	"strings"
 )
 
-// Scale 是小数位数（4 位，覆盖港股价格与百分比）。
+// Scale is the number of fractional digits (4, enough for HK prices and percentages).
 const Scale = 4
 
 const unit = 10000
 
-// Decimal 以最小单位（1e-4）存储的定点数。
+// Decimal is a fixed-point number stored in minimal units (1e-4).
 type Decimal struct{ units int64 }
 
-// FromUnits 由最小单位构造。
+// FromUnits builds a Decimal from minimal units.
 func FromUnits(units int64) Decimal { return Decimal{units: units} }
 
-// Parse 解析十进制字符串（如 "388.200"）。超过 Scale 的小数位四舍五入（远离零）。
+// Parse parses a decimal string (e.g. "388.200"). Digits beyond Scale are rounded half away from zero.
 func Parse(s string) (Decimal, error) {
 	raw := strings.TrimSpace(s)
 	neg := strings.HasPrefix(raw, "-")
@@ -47,16 +47,16 @@ func Parse(s string) (Decimal, error) {
 	return Decimal{units: units}, nil
 }
 
-// Units 返回最小单位值。
+// Units returns the value in minimal units.
 func (d Decimal) Units() int64 { return d.units }
 
-// Add 返回 d + o。
+// Add returns d + o.
 func (d Decimal) Add(o Decimal) Decimal { return Decimal{units: d.units + o.units} }
 
-// Sub 返回 d - o。
+// Sub returns d - o.
 func (d Decimal) Sub(o Decimal) Decimal { return Decimal{units: d.units - o.units} }
 
-// DivInt 返回 d / n，四舍五入（远离零）；n 必须大于 0。
+// DivInt returns d / n rounded half away from zero; n must be greater than 0.
 func (d Decimal) DivInt(n int64) Decimal {
 	half := n / 2
 	if d.units < 0 {
@@ -65,7 +65,7 @@ func (d Decimal) DivInt(n int64) Decimal {
 	return Decimal{units: (d.units + half) / n}
 }
 
-// PercentOf 返回 d 相对 base 的百分比；base 为 0 时返回 0。
+// PercentOf returns d as a percentage of base; returns 0 when base is 0.
 func (d Decimal) PercentOf(base Decimal) Decimal {
 	if base.units == 0 {
 		return Decimal{}
@@ -73,7 +73,7 @@ func (d Decimal) PercentOf(base Decimal) Decimal {
 	return Decimal{units: d.units * 100 * unit / base.units}
 }
 
-// String 输出固定 Scale 位小数的字符串，如 "123.4500"。
+// String formats the value with exactly Scale fractional digits, e.g. "123.4500".
 func (d Decimal) String() string {
 	sign := ""
 	u := d.units
