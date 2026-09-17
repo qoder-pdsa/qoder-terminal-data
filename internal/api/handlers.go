@@ -24,6 +24,13 @@ const maxIndicatorWindow = 250
 
 var rangeDays = map[string]int{"1M": 21, "3M": 63, "6M": 126, "1Y": 252}
 
+// indicatorFuncs maps the kind query parameter, whose enum lives in api/openapi.yaml, to its indicator.
+var indicatorFuncs = map[string]func([]money.Decimal, int) []*money.Decimal{
+	"sma": indicators.SMA,
+	"ema": indicators.EMA,
+	"rsi": indicators.RSI,
+}
+
 // Server holds the handler dependencies.
 type Server struct {
 	Provider provider.Provider
@@ -125,8 +132,10 @@ func (s *Server) indicator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	if kind := q.Get("kind"); kind != "sma" {
-		writeError(w, http.StatusBadRequest, "invalid_kind", "kind must be sma (ema/rsi on backlog)")
+	kind := q.Get("kind")
+	compute, ok := indicatorFuncs[kind]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_kind", "kind must be one of sma, ema, rsi")
 		return
 	}
 	window, err := strconv.Atoi(q.Get("window"))
@@ -147,7 +156,7 @@ func (s *Server) indicator(w http.ResponseWriter, r *http.Request) {
 	for i, c := range candles {
 		closes[i] = c.Close
 	}
-	values := indicators.SMA(closes, window)
+	values := compute(closes, window)
 	points := make([]map[string]any, len(candles))
 	for i, c := range candles {
 		var value any
@@ -156,7 +165,7 @@ func (s *Server) indicator(w http.ResponseWriter, r *http.Request) {
 		}
 		points[i] = map[string]any{"time": c.Time.Format(time.RFC3339), "value": value}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"symbol": symbol, "kind": "sma", "window": window, "points": points})
+	writeJSON(w, http.StatusOK, map[string]any{"symbol": symbol, "kind": kind, "window": window, "points": points})
 }
 
 // days converts the range parameter to a number of trading days, defaulting to 3M.

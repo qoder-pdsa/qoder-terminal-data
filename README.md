@@ -11,6 +11,8 @@ make lint       # go vet + gofmt + OpenAPI lint
 
 curl localhost:8081/v1/quotes/700.HK
 curl "localhost:8081/v1/indicators/700.HK?kind=sma&window=20"
+curl "localhost:8081/v1/indicators/700.HK?kind=ema&window=20"
+curl "localhost:8081/v1/indicators/700.HK?kind=rsi&window=14"
 ```
 
 ## Providers

@@ -18,6 +18,9 @@ type Decimal struct{ units int64 }
 // FromUnits builds a Decimal from minimal units.
 func FromUnits(units int64) Decimal { return Decimal{units: units} }
 
+// FromInt builds a Decimal from a whole number.
+func FromInt(n int64) Decimal { return Decimal{units: n * unit} }
+
 // Parse parses a decimal string (e.g. "388.200"). Digits beyond Scale are rounded half away from zero.
 func Parse(s string) (Decimal, error) {
 	raw := strings.TrimSpace(s)
@@ -55,6 +58,9 @@ func (d Decimal) Add(o Decimal) Decimal { return Decimal{units: d.units + o.unit
 
 // Sub returns d - o.
 func (d Decimal) Sub(o Decimal) Decimal { return Decimal{units: d.units - o.units} }
+
+// MulInt returns d * n, exactly.
+func (d Decimal) MulInt(n int64) Decimal { return Decimal{units: d.units * n} }
 
 // DivInt returns d / n rounded half away from zero; n must be greater than 0.
 func (d Decimal) DivInt(n int64) Decimal {

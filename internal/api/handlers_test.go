@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoder-pdsa/qoder-terminal-data/internal/money"
 	"github.com/qoder-pdsa/qoder-terminal-data/internal/provider"
 )
 
@@ -37,7 +38,11 @@ func TestRoutes(t *testing.T) {
 		{"news by symbol", "/v1/news?symbol=3690.HK", 200},
 		{"news bad limit", "/v1/news?limit=0", 400},
 		{"sma ok", "/v1/indicators/700.HK?kind=sma&window=20", 200},
+		{"ema ok", "/v1/indicators/700.HK?kind=ema&window=20", 200},
+		{"rsi ok", "/v1/indicators/700.HK?kind=rsi&window=14", 200},
 		{"sma bad kind", "/v1/indicators/700.HK?kind=macd&window=20", 400},
+		{"ema bad kind", "/v1/indicators/700.HK?kind=bollinger&window=20", 400},
+		{"rsi bad window", "/v1/indicators/700.HK?kind=rsi&window=251", 400},
 		{"sma bad window", "/v1/indicators/700.HK?kind=sma&window=0", 400},
 	}
 	for _, tt := range tests {
@@ -96,5 +101,136 @@ func TestIndicatorPointsAlignWithHistory(t *testing.T) {
 	}
 	if body.Points[3].Value != nil || body.Points[4].Value == nil {
 		t.Errorf("warm-up boundary wrong: [3]=%v [4]=%v", body.Points[3].Value, body.Points[4].Value)
+	}
+}
+
+// TestIndicatorKinds covers every kind the contract allows: the requested kind is echoed back, the
+// series stays aligned with the requested range, the warm-up nulls match each indicator's own rule
+// (sma/ema start at window-1, rsi starts at window) and every value is a canonical decimal string.
+func TestIndicatorKinds(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	tests := []struct {
+		name      string
+		path      string
+		kind      string
+		window    int
+		rng       string
+		wantFirst int
+	}{
+		{"sma over 1M", "/v1/indicators/700.HK?kind=sma&window=5&range=1M", "sma", 5, "1M", 4},
+		{"ema over 1M", "/v1/indicators/700.HK?kind=ema&window=5&range=1M", "ema", 5, "1M", 4},
+		{"rsi over 1M", "/v1/indicators/700.HK?kind=rsi&window=5&range=1M", "rsi", 5, "1M", 5},
+		{"ema over default range", "/v1/indicators/700.HK?kind=ema&window=20", "ema", 20, "3M", 19},
+		{"rsi over default range", "/v1/indicators/700.HK?kind=rsi&window=14", "rsi", 14, "3M", 14},
+		{"rsi window one", "/v1/indicators/700.HK?kind=rsi&window=1&range=1M", "rsi", 1, "1M", 1},
+		{"ema window one", "/v1/indicators/700.HK?kind=ema&window=1&range=1M", "ema", 1, "1M", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := http.Get(ts.URL + tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			}
+			var body struct {
+				Symbol string `json:"symbol"`
+				Kind   string `json:"kind"`
+				Window int    `json:"window"`
+				Points []struct {
+					Time  string          `json:"time"`
+					Value json.RawMessage `json:"value"`
+				} `json:"points"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Symbol != "700.HK" {
+				t.Errorf("symbol = %q, want 700.HK", body.Symbol)
+			}
+			if body.Kind != tt.kind {
+				t.Errorf("kind = %q, want %q echoed back", body.Kind, tt.kind)
+			}
+			if body.Window != tt.window {
+				t.Errorf("window = %d, want %d", body.Window, tt.window)
+			}
+			if len(body.Points) != rangeDays[tt.rng] {
+				t.Fatalf("points = %d, want %d", len(body.Points), rangeDays[tt.rng])
+			}
+			for i, p := range body.Points {
+				if i < tt.wantFirst {
+					if string(p.Value) != "null" {
+						t.Errorf("points[%d].value = %s, want null during warm-up", i, p.Value)
+					}
+					continue
+				}
+				var s string
+				if err := json.Unmarshal(p.Value, &s); err != nil {
+					t.Fatalf("points[%d].value = %s, want a decimal string not a JSON number", i, p.Value)
+				}
+				d, err := money.Parse(s)
+				if err != nil {
+					t.Fatalf("points[%d].value = %q: %v", i, s, err)
+				}
+				if d.String() != s {
+					t.Errorf("points[%d].value = %q, want the canonical %q", i, s, d.String())
+				}
+				if tt.kind == "rsi" && (d.Units() < 0 || d.Units() > 1_000_000) {
+					t.Errorf("points[%d].value = %s, want within 0-100", i, s)
+				}
+			}
+		})
+	}
+}
+
+// TestIndicatorTimesMatchHistory locks the deployment acceptance criterion that the indicator series
+// is aligned with history, for every kind.
+func TestIndicatorTimesMatchHistory(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	histResp, err := http.Get(ts.URL + "/v1/history/700.HK?range=1M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer histResp.Body.Close()
+	var candles []struct {
+		Time string `json:"time"`
+	}
+	if err := json.NewDecoder(histResp.Body).Decode(&candles); err != nil {
+		t.Fatal(err)
+	}
+	if len(candles) == 0 {
+		t.Fatal("history returned no candles, so this test would be vacuous")
+	}
+
+	for _, kind := range []string{"sma", "ema", "rsi"} {
+		t.Run(kind, func(t *testing.T) {
+			resp, err := http.Get(ts.URL + "/v1/indicators/700.HK?kind=" + kind + "&window=5&range=1M")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var body struct {
+				Points []struct {
+					Time string `json:"time"`
+				} `json:"points"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Points) != len(candles) {
+				t.Fatalf("points = %d, want %d", len(body.Points), len(candles))
+			}
+			for i := range candles {
+				if body.Points[i].Time != candles[i].Time {
+					t.Errorf("points[%d].time = %s, want %s", i, body.Points[i].Time, candles[i].Time)
+				}
+			}
+		})
 	}
 }
