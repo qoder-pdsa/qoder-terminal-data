@@ -17,6 +17,10 @@ import (
 
 const shutdownTimeout = 5 * time.Second
 
+// historyCacheTTL is how long daily candles are reused; it collapses the burst of history + indicator
+// requests one graph panel (or an ASK comparison opening several) makes into one upstream call per symbol.
+const historyCacheTTL = time.Minute
+
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
@@ -37,7 +41,7 @@ func run(log *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           (&api.Server{Provider: p, Log: log}).Routes(),
+		Handler:           (&api.Server{Provider: provider.NewCached(p, historyCacheTTL), Log: log}).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
