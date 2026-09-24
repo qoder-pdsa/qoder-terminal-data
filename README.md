@@ -23,6 +23,11 @@ curl "localhost:8081/v1/indicators/700.HK?kind=rsi&window=14"
 | `longbridge` | ✅ | Quotes, forward-adjusted daily candles, and news |
 | `replay` | 🚧 backlog | Replays recorded intraday data so demos are reproducible |
 
+Whatever the provider, `/v1/history` and `/v1/indicators` share daily candles through `provider.Cached`: concurrent
+requests for the same symbol and range wait for one upstream fetch, and the result is reused for one minute. This keeps
+a graph panel (history + one call per SMA window) or an `ASK compare` opening several panels under Longbridge's
+candlestick rate limit.
+
 ### Longbridge configuration
 
 Copy `.env.example` to `.env` and fill it in, or export the variables directly:
