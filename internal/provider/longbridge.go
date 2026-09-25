@@ -74,10 +74,14 @@ func (l *Longbridge) Quote(ctx context.Context, symbol string) (Quote, error) {
 	if err != nil {
 		return Quote{}, err
 	}
+	if len(quotes) == 0 {
+		return Quote{}, fmt.Errorf("longbridge quote %s: %w", symbol, ErrNotFound)
+	}
 	return quotes[0], nil
 }
 
-// Quotes implements Provider with one upstream call; a symbol missing from the reply is ErrNotFound.
+// Quotes implements Provider with one upstream call. Symbols missing from the reply (options and
+// other instruments the securities quote endpoint does not cover) are omitted, not an error.
 func (l *Longbridge) Quotes(ctx context.Context, symbols []string) ([]Quote, error) {
 	raw, err := l.quotes.Quote(ctx, symbols)
 	if err != nil {
@@ -93,7 +97,7 @@ func (l *Longbridge) Quotes(ctx context.Context, symbols []string) ([]Quote, err
 	for _, symbol := range symbols {
 		q, ok := bySymbol[symbol]
 		if !ok {
-			return nil, fmt.Errorf("longbridge quote %s: %w", symbol, ErrNotFound)
+			continue
 		}
 		mapped, err := toQuote(symbol, q)
 		if err != nil {
@@ -147,13 +151,11 @@ func (l *Longbridge) Watchlists(ctx context.Context) ([]Watchlist, error) {
 }
 
 // CapitalFlow implements Provider from the intraday flow lines and the order-size distribution.
+// Before the first trade of the day Longbridge returns no lines; that is an empty flow, not ErrNotFound.
 func (l *Longbridge) CapitalFlow(ctx context.Context, symbol string) (CapitalFlow, error) {
 	lines, err := l.quotes.CapitalFlow(ctx, symbol)
 	if err != nil {
 		return CapitalFlow{}, fmt.Errorf("longbridge capital flow %s: %w", symbol, err)
-	}
-	if len(lines) == 0 {
-		return CapitalFlow{}, fmt.Errorf("longbridge capital flow %s: %w", symbol, ErrNotFound)
 	}
 	dist, err := l.quotes.CapitalDistribution(ctx, symbol)
 	if err != nil {
