@@ -3,8 +3,8 @@ package provider
 // Characterization tests locking the PRE-CHANGE behaviour of Longbridge.News.
 //
 // Purpose: BUG-01 makes a Longbridge rate-limit answer (HTTP 429 / code 429003, "minimum 0.02 s
-// between calls") retry once with backoff instead of surfacing immediately as 502 provider_error,
-// and gives news the short-TTL cache history/intraday already have. These tests pin every other
+// between calls") retry with backoff instead of surfacing immediately as 502 provider_error, and
+// gives news the short-TTL cache history/intraday already have. These tests pin every other
 // observable behaviour of the news path so the fix cannot silently change it.
 // Group selection (Go has no tag mechanism in this repo, so the group is name-based):
 //
@@ -13,17 +13,20 @@ package provider
 // Baseline: actually run on the unchanged tree at commit f34a290 before any modification
 // (evidence/baseline-characterization-data.log).
 //
-// Deliberately NOT asserted here, because the work item explicitly changes it:
-//   - the number of upstream News calls made for a rate-limited symbol. Today it is exactly 1 and
-//     the caller gets the wrapped 429; acceptance criterion 2 requires one backoff retry first.
-//     The real pre-change value is recorded in evidence/baseline-news-ratelimit-probe.log.
-//   - whether Cached reuses a News result. Today every Cached.News call reaches the underlying
-//     provider (Cached only wraps History and Intraday); acceptance criterion 2 requires a
-//     short-TTL news cache with in-flight coalescing, like History.
+// Changed on purpose, at the requester's written instruction, and pinned elsewhere:
+//   - the number of upstream News calls made for a rate-limited symbol. Pre-change it was exactly
+//     1 and the caller got the wrapped 429 (evidence/baseline-news-ratelimit-probe.log); round 1
+//     made it 2 (one 100 ms retry); round 2 makes it 4 (100/300/900 ms ladder), because human
+//     acceptance rejected round 1 — a saturated window outlasted a single retry (work item 10009
+//     comment 10074, qoder-terminal-web backlog commit 50e0cec). news_retry_test.go pins the count.
+//   - whether Cached reuses a News result. Pre-change every Cached.News call reached the underlying
+//     provider; round 1 added the short-TTL news cache with in-flight coalescing that acceptance
+//     criterion 2 requires, pinned in cache_test.go. Round 2 keeps it unchanged.
 //
 // Still locked: a non-rate-limit upstream failure is called exactly once and surfaced wrapped with
-// "longbridge news <symbol>: " context, an empty symbol never reaches the upstream, and the item
-// mapping (source, symbols, UTC timestamp, limit, skipped items) is unchanged.
+// "longbridge news <symbol>: " context, an exhausted rate-limit ladder keeps the same wrapped 429
+// detail, an empty symbol never reaches the upstream, and the item mapping (source, symbols, UTC
+// timestamp, limit, skipped items) is unchanged.
 
 import (
 	"context"
@@ -72,7 +75,7 @@ func TestCharacterizationLongbridgeNewsMappingIsUnchanged(t *testing.T) {
 		{Id: "a", Title: "First", Description: "Summary A", Url: "https://example.com/a", PublishedAt: published},
 		{Id: "b", Title: "Second", Description: "Summary B", Url: "https://example.com/b", PublishedAt: published},
 	}}
-	lb := &Longbridge{news: up}
+	lb, _ := newPacedLongbridge(up)
 
 	items, err := lb.News(context.Background(), "700.HK", 10)
 	if err != nil {
@@ -108,7 +111,7 @@ func TestCharacterizationLongbridgeNewsLimitIsAppliedAfterSkipping(t *testing.T)
 		{Id: "a", Url: "https://example.com/a"},
 		{Id: "b", Url: "https://example.com/b"},
 	}}
-	lb := &Longbridge{news: up}
+	lb, _ := newPacedLongbridge(up)
 
 	items, err := lb.News(context.Background(), "9988.HK", 1)
 	if err != nil {
@@ -121,7 +124,7 @@ func TestCharacterizationLongbridgeNewsLimitIsAppliedAfterSkipping(t *testing.T)
 
 func TestCharacterizationLongbridgeNewsEmptySymbolNeverCallsUpstream(t *testing.T) {
 	up := &charNewsAPI{}
-	lb := &Longbridge{news: up}
+	lb, _ := newPacedLongbridge(up)
 
 	_, err := lb.News(context.Background(), "", 5)
 	if !errors.Is(err, ErrSymbolRequired) {
@@ -137,7 +140,7 @@ func TestCharacterizationLongbridgeNewsEmptySymbolNeverCallsUpstream(t *testing.
 func TestCharacterizationLongbridgeNewsNonRateLimitFailureIsNotRetried(t *testing.T) {
 	upstream := errors.New("connection reset by peer")
 	up := &charNewsAPI{errs: []error{upstream, upstream}}
-	lb := &Longbridge{news: up}
+	lb, _ := newPacedLongbridge(up)
 
 	_, err := lb.News(context.Background(), "700.HK", 5)
 	if err == nil {
@@ -155,10 +158,13 @@ func TestCharacterizationLongbridgeNewsNonRateLimitFailureIsNotRetried(t *testin
 }
 
 // The rate-limit answer must keep its wrapping and stay identifiable to the caller; only the number
-// of attempts changes with BUG-01, not the error the caller eventually sees.
+// of attempts changes with BUG-01 (4 since round 2, pinned in news_retry_test.go), not the error the
+// caller eventually sees. The fake therefore refuses every attempt of the ladder.
 func TestCharacterizationLongbridgeNewsRateLimitStaysWrapped(t *testing.T) {
-	up := &charNewsAPI{errs: []error{charRateLimitError(), charRateLimitError(), charRateLimitError()}}
-	lb := &Longbridge{news: up}
+	up := &charNewsAPI{errs: []error{
+		charRateLimitError(), charRateLimitError(), charRateLimitError(), charRateLimitError(),
+	}}
+	lb, _ := newPacedLongbridge(up)
 
 	_, err := lb.News(context.Background(), "700.HK", 5)
 	if err == nil {

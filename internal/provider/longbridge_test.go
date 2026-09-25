@@ -99,11 +99,11 @@ func TestLongbridgeHistory(t *testing.T) {
 
 func TestLongbridgeNewsSkipsItemsWithoutURLAndRespectsLimit(t *testing.T) {
 	now := time.Now()
-	lb := &Longbridge{news: fakeNews{items: []*content.NewsItem{
+	lb, _ := newPacedLongbridge(fakeNews{items: []*content.NewsItem{
 		{Id: "1", Title: "no url", PublishedAt: now},
 		{Id: "2", Title: "a", Url: "https://example.com/a", PublishedAt: now},
 		{Id: "3", Title: "b", Url: "https://example.com/b", PublishedAt: now},
-	}}}
+	}})
 	items, err := lb.News(context.Background(), "700.HK", 1)
 	if err != nil {
 		t.Fatal(err)
