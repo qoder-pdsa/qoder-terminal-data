@@ -28,9 +28,13 @@ func TestMockQuotesKeepRequestedOrder(t *testing.T) {
 	}
 }
 
-func TestMockQuotesUnknownSymbolIsNotFound(t *testing.T) {
-	if _, err := watchMock().Quotes(context.Background(), []string{"700.HK", "0000.HK"}); !errors.Is(err, ErrNotFound) {
-		t.Errorf("want ErrNotFound, got %v", err)
+func TestMockQuotesOmitsUnknownSymbols(t *testing.T) {
+	quotes, err := watchMock().Quotes(context.Background(), []string{"700.HK", "MSFT261016P420000.US", "9988.HK"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quotes) != 2 || quotes[0].Symbol != "700.HK" || quotes[1].Symbol != "9988.HK" {
+		t.Errorf("want the two known symbols in order, got %+v", quotes)
 	}
 }
 

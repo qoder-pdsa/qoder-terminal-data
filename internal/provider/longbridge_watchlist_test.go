@@ -29,11 +29,18 @@ func TestLongbridgeQuotesUsesOneUpstreamCallInRequestedOrder(t *testing.T) {
 	}
 }
 
-func TestLongbridgeQuotesMissingSymbolIsNotFound(t *testing.T) {
+func TestLongbridgeQuotesOmitsSymbolsWithoutAQuote(t *testing.T) {
 	fake := &fakeQuotes{quotes: []*quote.SecurityQuote{{Symbol: "700.HK", LastDone: dec("1"), PrevClose: dec("1")}}}
 	lb := &Longbridge{quotes: fake}
-	if _, err := lb.Quotes(context.Background(), []string{"700.HK", "0000.HK"}); !errors.Is(err, ErrNotFound) {
-		t.Errorf("want ErrNotFound, got %v", err)
+	quotes, err := lb.Quotes(context.Background(), []string{"MSFT261016P420000.US", "700.HK"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quotes) != 1 || quotes[0].Symbol != "700.HK" {
+		t.Errorf("want only 700.HK, got %+v", quotes)
+	}
+	if _, err := lb.Quote(context.Background(), "MSFT261016P420000.US"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("single quote of a missing symbol: want ErrNotFound, got %v", err)
 	}
 }
 
@@ -82,9 +89,15 @@ func TestLongbridgeCapitalFlowMapsLinesAndDistribution(t *testing.T) {
 	}
 }
 
-func TestLongbridgeCapitalFlowEmptyIsNotFound(t *testing.T) {
-	lb := &Longbridge{quotes: &fakeQuotes{}}
-	if _, err := lb.CapitalFlow(context.Background(), "0000.HK"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("want ErrNotFound, got %v", err)
+func TestLongbridgeCapitalFlowBeforeOpenIsEmptyNotMissing(t *testing.T) {
+	lb := &Longbridge{quotes: &fakeQuotes{dist: quote.CapitalDistribution{
+		CapitalIn: quote.Capital{Large: dec("0"), Medium: dec("0"), Small: dec("0")}, CapitalOut: quote.Capital{Large: dec("0"), Medium: dec("0"), Small: dec("0")},
+	}}}
+	cf, err := lb.CapitalFlow(context.Background(), "700.HK")
+	if err != nil {
+		t.Fatalf("pre-open flow must not error: %v", err)
+	}
+	if cf.Flow == nil || len(cf.Flow) != 0 {
+		t.Errorf("want an empty (non-nil) flow, got %+v", cf.Flow)
 	}
 }

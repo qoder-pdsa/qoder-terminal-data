@@ -16,8 +16,8 @@ import (
 	"github.com/qoder-pdsa/qoder-terminal-data/internal/provider"
 )
 
-// symbolPattern matches the Symbol parameter in api/openapi.yaml, e.g. 700.HK or AAPL.US.
-var symbolPattern = regexp.MustCompile(`^[0-9A-Z]{1,6}\.(HK|US|SH|SZ)$`)
+// symbolPattern matches the Symbol parameter in api/openapi.yaml, e.g. 700.HK, AAPL.US or the option MSFT261016P420000.US.
+var symbolPattern = regexp.MustCompile(`^[0-9A-Z]{1,20}\.(HK|US|SH|SZ)$`)
 
 const symbolHint = "symbol must look like 700.HK"
 

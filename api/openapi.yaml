@@ -52,7 +52,7 @@ paths:
         - name: symbol
           in: query
           description: Required with the longbridge provider
-          schema: { type: string, pattern: "^[0-9A-Z]{1,6}\\.(HK|US|SH|SZ)$" }
+          schema: { type: string, pattern: "^[0-9A-Z]{1,20}\\.(HK|US|SH|SZ)$" }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
@@ -92,7 +92,10 @@ paths:
     get:
       operationId: listQuotes
       summary: Batch quotes
-      description: One upstream call for a whole watchlist; symbols are comma-separated, at most 20
+      description: |
+        One upstream call for a whole watchlist; symbols are comma-separated, at most 20.
+        Symbols the provider has no quote for (e.g. options) are omitted from the reply, so the
+        result may be shorter than the request.
       parameters:
         - name: symbols
           in: query
@@ -129,7 +132,7 @@ paths:
         - $ref: "#/components/parameters/Symbol"
       responses:
         "200":
-          description: Per-minute net inflow and the large / medium / small order distribution
+          description: Per-minute net inflow and the large / medium / small order distribution; `flow` is empty before the first trade of the day
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CapitalFlow" }
@@ -145,7 +148,7 @@ components:
       name: symbol
       in: path
       required: true
-      schema: { type: string, pattern: "^[0-9A-Z]{1,6}\\.(HK|US|SH|SZ)$", example: "700.HK" }
+      schema: { type: string, pattern: "^[0-9A-Z]{1,20}\\.(HK|US|SH|SZ)$", example: "700.HK" }
   responses:
     Error:
       description: Error

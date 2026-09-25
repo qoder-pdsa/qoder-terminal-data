@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"time"
@@ -124,11 +125,14 @@ var demoWatchlist = []string{"700.HK", "9988.HK", "3690.HK", "1810.HK", "1211.HK
 // capitalFlowMinutes is how many one-minute points the mock capital flow covers.
 const capitalFlowMinutes = 60
 
-// Quotes implements Provider.
+// Quotes implements Provider; symbols the mock does not know are omitted, like a real provider does for options.
 func (m *Mock) Quotes(ctx context.Context, symbols []string) ([]Quote, error) {
 	quotes := make([]Quote, 0, len(symbols))
 	for _, symbol := range symbols {
 		q, err := m.Quote(ctx, symbol)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
