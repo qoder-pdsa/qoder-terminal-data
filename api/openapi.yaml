@@ -181,12 +181,20 @@ components:
       description: Decimal number encoded as a string; floats are not allowed
     Quote:
       type: object
-      required: [symbol, price, change, changePercent, currency, asOf]
+      required: [symbol, price, change, changePercent, open, high, low, volume, turnover, currency, asOf]
       properties:
         symbol: { type: string }
         price: { $ref: "#/components/schemas/Decimal" }
         change: { $ref: "#/components/schemas/Decimal" }
         changePercent: { $ref: "#/components/schemas/Decimal" }
+        open: { $ref: "#/components/schemas/Decimal" }
+        high: { $ref: "#/components/schemas/Decimal" }
+        low: { $ref: "#/components/schemas/Decimal" }
+        volume:
+          type: integer
+          format: int64
+          description: Shares traded this session; 0 before the first trade
+        turnover: { $ref: "#/components/schemas/Decimal" }
         currency: { type: string, enum: [HKD, USD, CNY] }
         asOf: { type: string, format: date-time }
     Candle:

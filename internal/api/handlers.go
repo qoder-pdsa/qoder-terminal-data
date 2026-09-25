@@ -70,12 +70,19 @@ func (s *Server) quote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, quoteBody(q))
 }
 
-func quoteBody(q provider.Quote) map[string]string {
-	return map[string]string{
+// quoteBody serialises a quote exactly as api/openapi.yaml declares it: every price-shaped field
+// is a decimal string, volume is the only integer.
+func quoteBody(q provider.Quote) map[string]any {
+	return map[string]any{
 		"symbol":        q.Symbol,
 		"price":         q.Price.String(),
 		"change":        q.Change.String(),
 		"changePercent": q.ChangePercent.String(),
+		"open":          q.Open.String(),
+		"high":          q.High.String(),
+		"low":           q.Low.String(),
+		"volume":        q.Volume,
+		"turnover":      q.Turnover.String(),
 		"currency":      q.Currency,
 		"asOf":          q.AsOf.Format(time.RFC3339),
 	}
@@ -94,7 +101,7 @@ func (s *Server) quotes(w http.ResponseWriter, r *http.Request) {
 		s.providerError(w, err)
 		return
 	}
-	out := make([]map[string]string, 0, len(quotes))
+	out := make([]map[string]any, 0, len(quotes))
 	for _, q := range quotes {
 		out = append(out, quoteBody(q))
 	}

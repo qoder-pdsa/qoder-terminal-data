@@ -31,6 +31,11 @@ type Quote struct {
 	Price         money.Decimal
 	Change        money.Decimal
 	ChangePercent money.Decimal
+	Open          money.Decimal
+	High          money.Decimal
+	Low           money.Decimal
+	Volume        int64
+	Turnover      money.Decimal
 	Currency      string
 	AsOf          time.Time
 }
