@@ -17,6 +17,7 @@ type Cached struct {
 	Provider
 	history  *flightCache[historyKey, []Candle]
 	intraday *flightCache[string, Intraday]
+	news     *flightCache[newsKey, []NewsItem]
 }
 
 type historyKey struct {
@@ -24,12 +25,19 @@ type historyKey struct {
 	days   int
 }
 
-// NewCached wraps p; History results are reused for historyTTL, Intraday results for intradayTTL.
-func NewCached(p Provider, historyTTL, intradayTTL time.Duration) *Cached {
+type newsKey struct {
+	symbol string
+	limit  int
+}
+
+// NewCached wraps p; History results are reused for historyTTL, Intraday results for intradayTTL,
+// and News results for newsTTL.
+func NewCached(p Provider, historyTTL, intradayTTL, newsTTL time.Duration) *Cached {
 	return &Cached{
 		Provider: p,
 		history:  newFlightCache[historyKey, []Candle](historyTTL),
 		intraday: newFlightCache[string, Intraday](intradayTTL),
+		news:     newFlightCache[newsKey, []NewsItem](newsTTL),
 	}
 }
 
@@ -53,6 +61,24 @@ func (c *Cached) Intraday(ctx context.Context, symbol string) (Intraday, error) 
 		return Intraday{}, err
 	}
 	return Intraday{Symbol: in.Symbol, Currency: in.Currency, PrevClose: in.PrevClose, Points: append([]IntradayPoint(nil), in.Points...)}, nil
+}
+
+// News implements Provider. Longbridge news is queried per symbol, so a bare `N` — which asks for
+// one feed per watchlist symbol — used to re-issue the whole burst on every poll and was answered
+// with HTTP 429; caching the feed makes the burst happen once per TTL instead.
+func (c *Cached) News(ctx context.Context, symbol string, limit int) ([]NewsItem, error) {
+	items, err := c.news.get(ctx, newsKey{symbol, limit}, func(ctx context.Context) ([]NewsItem, error) {
+		return c.Provider.News(ctx, symbol, limit)
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NewsItem, len(items))
+	for i, item := range items {
+		item.Symbols = append([]string(nil), item.Symbols...)
+		out[i] = item
+	}
+	return out, nil
 }
 
 // flightCache coalesces concurrent fetches per key and keeps successful results for ttl.

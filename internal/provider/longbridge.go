@@ -11,6 +11,7 @@ import (
 
 	"github.com/longbridge/openapi-go/config"
 	"github.com/longbridge/openapi-go/content"
+	lbhttp "github.com/longbridge/openapi-go/http"
 	"github.com/longbridge/openapi-go/quote"
 	"github.com/shopspring/decimal"
 
@@ -19,6 +20,17 @@ import (
 
 // maxCandles is the Longbridge limit for a single candlestick request.
 const maxCandles = 1000
+
+// newsRetryBackoff is how long a rate-limited news call waits before its single retry. Longbridge
+// asks for at least 0.02 s between content calls; this leaves room for the rest of the burst.
+const newsRetryBackoff = 100 * time.Millisecond
+
+// rateLimitStatus and rateLimitCode are how Longbridge refuses a call that arrived too soon after
+// the previous one: HTTP 429 carrying code 429003, "minimum 0.02s between calls".
+const (
+	rateLimitStatus = 429
+	rateLimitCode   = 429003
+)
 
 // quoteAPI is the subset of Longbridge QuoteContext used by this service, so tests can substitute it.
 type quoteAPI interface {
@@ -252,11 +264,19 @@ func (l *Longbridge) History(ctx context.Context, symbol string, days int) ([]Ca
 }
 
 // News implements Provider. Longbridge news is queried per symbol, so an empty symbol returns ErrSymbolRequired.
+// A bare `N` fans out one request per watchlist symbol and the burst is answered with a rate limit,
+// so one backoff retry absorbs it before the error is allowed to surface as a 502.
 func (l *Longbridge) News(ctx context.Context, symbol string, limit int) ([]NewsItem, error) {
 	if symbol == "" {
 		return nil, ErrSymbolRequired
 	}
 	raw, err := l.news.News(ctx, symbol)
+	if isRateLimited(err) {
+		if waitErr := waitBeforeRetry(ctx, newsRetryBackoff); waitErr != nil {
+			return nil, fmt.Errorf("longbridge news %s: %w", symbol, waitErr)
+		}
+		raw, err = l.news.News(ctx, symbol)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("longbridge news %s: %w", symbol, err)
 	}
@@ -283,6 +303,29 @@ func (l *Longbridge) News(ctx context.Context, symbol string, limit int) ([]News
 
 // ErrSymbolRequired means the provider cannot query the whole market and needs a symbol.
 var ErrSymbolRequired = errors.New("symbol is required by this provider")
+
+// isRateLimited reports whether Longbridge refused the call only because it arrived too soon.
+// The SDK returns *lbhttp.ApiError unwrapped, so errors.As finds it directly.
+func isRateLimited(err error) bool {
+	var apiErr *lbhttp.ApiError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.HttpStatus == rateLimitStatus || apiErr.Code == rateLimitCode
+}
+
+// waitBeforeRetry holds for d, but returns the context's error at once if the caller goes away,
+// so a cancelled request is never made to wait out the backoff.
+func waitBeforeRetry(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 func toMoney(d *decimal.Decimal) (money.Decimal, error) {
 	if d == nil {

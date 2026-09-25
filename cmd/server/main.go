@@ -24,6 +24,10 @@ const historyCacheTTL = time.Minute
 // intradayCacheTTL is how long the minute line is reused; every open Q panel re-polls it every 10 s.
 const intradayCacheTTL = 10 * time.Second
 
+// newsCacheTTL is how long a per-symbol news feed is reused; it absorbs the repeat presses of `N` and
+// panel remounts, so the burst of one request per watchlist symbol is not re-issued and rate limited.
+const newsCacheTTL = 30 * time.Second
+
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
@@ -42,9 +46,11 @@ func run(log *slog.Logger) error {
 	}
 	defer func() { _ = closeProvider() }()
 
+	cached := provider.NewCached(p, historyCacheTTL, intradayCacheTTL, newsCacheTTL)
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           (&api.Server{Provider: provider.NewCached(p, historyCacheTTL, intradayCacheTTL), Log: log}).Routes(),
+		Handler:           (&api.Server{Provider: cached, Log: log}).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
