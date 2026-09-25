@@ -88,9 +88,86 @@ func TestQuotePricesAreDecimalStrings(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"price", "change", "changePercent"} {
+	for _, field := range []string{"price", "change", "changePercent", "open", "high", "low", "turnover"} {
 		if _, ok := body[field].(string); !ok {
 			t.Errorf("%s should be a decimal string, got %T", field, body[field])
+		}
+	}
+}
+
+// TestQuoteVolumeIsAJSONInteger pins the one new field that is not a decimal string: the contract
+// declares volume as integer/int64, so it must serialise as a JSON number, and it must survive the
+// move of quoteBody from map[string]string to map[string]any.
+func TestQuoteVolumeIsAJSONInteger(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/v1/quotes/700.HK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	volume, ok := body["volume"]
+	if !ok {
+		t.Fatalf("volume missing from the quote body: %v", body)
+	}
+	number, isNumber := volume.(float64)
+	if !isNumber {
+		t.Fatalf("volume = %#v (%T), want a JSON number", volume, volume)
+	}
+	if number != float64(int64(number)) {
+		t.Errorf("volume = %v, want a whole int64 value", volume)
+	}
+	if int64(number) <= 0 {
+		t.Errorf("volume = %v, want a positive session volume", volume)
+	}
+}
+
+// TestQuoteSessionStatsReachTheClient pins the five fields BL-11-1 adds to the contract on both
+// quote endpoints, with the exact values the mock provider derives (see
+// internal/provider/mock_test.go for the formula).
+func TestQuoteSessionStatsReachTheClient(t *testing.T) {
+	ts := newTestServer()
+	defer ts.Close()
+
+	wantSingle := map[string]any{
+		"open": "349.6565", "high": "349.8065", "low": "348.7146",
+		"turnover": "558686073.8886", "volume": float64(1_601_441),
+	}
+	var single map[string]any
+	resp, err := http.Get(ts.URL + "/v1/quotes/700.HK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&single); err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range wantSingle {
+		if single[field] != want {
+			t.Errorf("single %s = %#v, want %#v", field, single[field], want)
+		}
+	}
+
+	var batch []map[string]any
+	resp2, err := http.Get(ts.URL + "/v1/quotes?symbols=700.HK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if err := json.NewDecoder(resp2.Body).Decode(&batch); err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 {
+		t.Fatalf("batch length = %d, want 1", len(batch))
+	}
+	for field, want := range wantSingle {
+		if batch[0][field] != want {
+			t.Errorf("batch %s = %#v, want %#v", field, batch[0][field], want)
 		}
 	}
 }

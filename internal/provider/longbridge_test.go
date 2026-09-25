@@ -72,6 +72,96 @@ func TestLongbridgeQuoteMapsDecimals(t *testing.T) {
 	}
 }
 
+// TestLongbridgeQuoteMapsSessionStats pins the BL-11 mapping of SecurityQuote.Open/High/Low/
+// Volume/Turnover through toMoney, on a quote taken during the session when Longbridge fills
+// every field.
+func TestLongbridgeQuoteMapsSessionStats(t *testing.T) {
+	lb := &Longbridge{quotes: &fakeQuotes{quotes: []*quote.SecurityQuote{{
+		Symbol: "700.HK", LastDone: dec("388.200"), PrevClose: dec("380.000"),
+		Open: dec("381.500"), High: dec("389.900"), Low: dec("379.100"),
+		Volume: 12_345_678, Turnover: dec("4765432100.5"), Timestamp: 1_758_000_000,
+	}}}}
+	q, err := lb.Quote(context.Background(), "700.HK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := []struct{ name, want, actual string }{
+		{"open", "381.5000", q.Open.String()},
+		{"high", "389.9000", q.High.String()},
+		{"low", "379.1000", q.Low.String()},
+		{"turnover", "4765432100.5000", q.Turnover.String()},
+		{"price", "388.2000", q.Price.String()},
+		{"change", "8.2000", q.Change.String()},
+	}
+	for _, f := range fields {
+		if f.actual != f.want {
+			t.Errorf("%s = %s, want %s", f.name, f.actual, f.want)
+		}
+	}
+	if q.Volume != 12_345_678 {
+		t.Errorf("volume = %d, want 12345678", q.Volume)
+	}
+}
+
+// TestLongbridgeQuoteBeforeOpenUsesPrevClose pins the pre-session fallback. Longbridge omits
+// Open/High/Low/Turnover (nil pointers) and reports zero Volume until the first trade of the
+// session, which on a HK symbol is 09:30 HKT. Mapping those nils through toMoney would either
+// error or print a nonsense "0.0000" price on the terminal, so open/high/low fall back to the
+// previous close — the only price that is actually known — while volume and turnover stay zero
+// because nothing has traded yet.
+func TestLongbridgeQuoteBeforeOpenUsesPrevClose(t *testing.T) {
+	lb := &Longbridge{quotes: &fakeQuotes{quotes: []*quote.SecurityQuote{{
+		Symbol: "700.HK", LastDone: dec("380.000"), PrevClose: dec("380.000"),
+		Open: nil, High: nil, Low: nil, Turnover: nil, Volume: 0, Timestamp: 1_758_000_000,
+	}}}}
+	q, err := lb.Quote(context.Background(), "700.HK")
+	if err != nil {
+		t.Fatalf("pre-open quote must not error: %v", err)
+	}
+	fields := []struct{ name, want, actual string }{
+		{"open", "380.0000", q.Open.String()},
+		{"high", "380.0000", q.High.String()},
+		{"low", "380.0000", q.Low.String()},
+		{"turnover", "0.0000", q.Turnover.String()},
+	}
+	for _, f := range fields {
+		if f.actual != f.want {
+			t.Errorf("%s = %s, want %s", f.name, f.actual, f.want)
+		}
+	}
+	if q.Volume != 0 {
+		t.Errorf("volume = %d, want 0 before the first trade", q.Volume)
+	}
+	if q.Open.Units() == 0 {
+		t.Error("open is 0.0000; the previous close fallback did not run")
+	}
+}
+
+// TestLongbridgeQuotesCarrySessionStats pins that the batch path — one upstream call for the whole
+// watchlist — maps the new fields too, so the W panel and the Q panel cannot disagree.
+func TestLongbridgeQuotesCarrySessionStats(t *testing.T) {
+	lb := &Longbridge{quotes: &fakeQuotes{quotes: []*quote.SecurityQuote{
+		{Symbol: "700.HK", LastDone: dec("388.200"), PrevClose: dec("380.000"), Open: dec("381.500"), High: dec("389.900"), Low: dec("379.100"), Volume: 12_345_678, Turnover: dec("4765432100.5"), Timestamp: 1_758_000_000},
+		{Symbol: "9988.HK", LastDone: dec("120.000"), PrevClose: dec("118.000"), Open: nil, High: nil, Low: nil, Volume: 0, Turnover: nil, Timestamp: 1_758_000_000},
+	}}}
+	quotes, err := lb.Quotes(context.Background(), []string{"9988.HK", "700.HK"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quotes) != 2 {
+		t.Fatalf("len = %d, want 2", len(quotes))
+	}
+	if quotes[0].Symbol != "9988.HK" || quotes[1].Symbol != "700.HK" {
+		t.Fatalf("order not preserved: %s, %s", quotes[0].Symbol, quotes[1].Symbol)
+	}
+	if quotes[0].Open.String() != "118.0000" || quotes[0].High.String() != "118.0000" || quotes[0].Low.String() != "118.0000" {
+		t.Errorf("9988.HK pre-open fallback: open=%s high=%s low=%s, want all 118.0000", quotes[0].Open, quotes[0].High, quotes[0].Low)
+	}
+	if quotes[1].Open.String() != "381.5000" || quotes[1].Volume != 12_345_678 {
+		t.Errorf("700.HK: open=%s volume=%d, want 381.5000 and 12345678", quotes[1].Open, quotes[1].Volume)
+	}
+}
+
 func TestLongbridgeQuoteEmptyIsNotFound(t *testing.T) {
 	lb := &Longbridge{quotes: &fakeQuotes{}}
 	if _, err := lb.Quote(context.Background(), "0000.HK"); !errors.Is(err, ErrNotFound) {

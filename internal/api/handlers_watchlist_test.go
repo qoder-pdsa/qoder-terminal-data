@@ -43,7 +43,7 @@ func TestQuotesBatchMatchesSingleQuotes(t *testing.T) {
 	}
 	var single map[string]any
 	getJSON(t, ts.URL+"/v1/quotes/700.HK", &single)
-	for _, k := range []string{"price", "change", "changePercent", "currency", "asOf"} {
+	for _, k := range []string{"price", "change", "changePercent", "open", "high", "low", "volume", "turnover", "currency", "asOf"} {
 		if batch[1][k] != single[k] {
 			t.Errorf("%s: batch %v != single %v", k, batch[1][k], single[k])
 		}

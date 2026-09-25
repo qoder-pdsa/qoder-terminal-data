@@ -56,16 +56,28 @@ func (m *Mock) Quote(_ context.Context, symbol string) (Quote, error) {
 	if err := m.ensure(symbol); err != nil {
 		return Quote{}, err
 	}
-	price := money.FromUnits(closeUnits(symbol, 0))
-	prev := money.FromUnits(closeUnits(symbol, 1))
+	openUnits := closeUnits(symbol, 1)
+	priceUnits := closeUnits(symbol, 0)
+	price := money.FromUnits(priceUnits)
+	prev := money.FromUnits(openUnits)
 	change := price.Sub(prev)
+	volume := 1_000_000 + seed(symbol)%5_000_000
 	return Quote{
 		Symbol:        symbol,
 		Price:         price,
 		Change:        change,
 		ChangePercent: change.PercentOf(prev),
-		Currency:      CurrencyOf(symbol),
-		AsOf:          m.Now().UTC(),
+		// The session range mirrors the offset-0 daily candle in History: the day opens at the
+		// previous close and trades 0.1500 beyond the open/close extremes, so the invariant
+		// low <= open, close <= high holds for every symbol by construction. Turnover is the
+		// last price times the volume; the mock has no intraday trade tape to integrate.
+		Open:     prev,
+		High:     money.FromUnits(max(openUnits, priceUnits) + 1500),
+		Low:      money.FromUnits(min(openUnits, priceUnits) - 1500),
+		Volume:   volume,
+		Turnover: price.MulInt(volume),
+		Currency: CurrencyOf(symbol),
+		AsOf:     m.Now().UTC(),
 	}, nil
 }
 

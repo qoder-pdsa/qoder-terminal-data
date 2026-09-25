@@ -128,11 +128,37 @@ func toQuote(symbol string, q *quote.SecurityQuote) (Quote, error) {
 		return Quote{}, err
 	}
 	change := price.Sub(prev)
+	// Before the first trade of the session (09:30 HKT for a HK symbol) Longbridge leaves
+	// Open/High/Low/Turnover nil and reports zero Volume. Those nils must not reach the terminal
+	// as a "0.0000" price, so open/high/low fall back to the previous close — the only price that
+	// is actually known at that moment — while volume and turnover stay zero, which is the truth:
+	// nothing has traded yet.
+	open, err := toMoneyOr(q.Open, prev)
+	if err != nil {
+		return Quote{}, err
+	}
+	high, err := toMoneyOr(q.High, prev)
+	if err != nil {
+		return Quote{}, err
+	}
+	low, err := toMoneyOr(q.Low, prev)
+	if err != nil {
+		return Quote{}, err
+	}
+	turnover, err := toMoneyOr(q.Turnover, money.FromInt(0))
+	if err != nil {
+		return Quote{}, err
+	}
 	return Quote{
 		Symbol:        symbol,
 		Price:         price,
 		Change:        change,
 		ChangePercent: change.PercentOf(prev),
+		Open:          open,
+		High:          high,
+		Low:           low,
+		Volume:        q.Volume,
+		Turnover:      turnover,
 		Currency:      CurrencyOf(symbol),
 		AsOf:          time.Unix(q.Timestamp, 0).UTC(),
 	}, nil
@@ -314,6 +340,16 @@ func isRateLimited(err error) bool {
 func toMoney(d *decimal.Decimal) (money.Decimal, error) {
 	if d == nil {
 		return money.Decimal{}, errors.New("longbridge: missing decimal field")
+	}
+	return money.Parse(d.String())
+}
+
+// toMoneyOr maps a Longbridge decimal that the upstream may legitimately omit, substituting
+// fallback instead of failing. Use it only for fields where a known-good substitute exists; a
+// field that must be present keeps using toMoney so a gap stays an error.
+func toMoneyOr(d *decimal.Decimal, fallback money.Decimal) (money.Decimal, error) {
+	if d == nil {
+		return fallback, nil
 	}
 	return money.Parse(d.String())
 }
