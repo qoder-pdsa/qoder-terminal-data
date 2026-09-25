@@ -24,6 +24,7 @@ const maxCandles = 1000
 type quoteAPI interface {
 	Quote(ctx context.Context, symbols []string) ([]*quote.SecurityQuote, error)
 	Candlesticks(ctx context.Context, symbol string, period quote.Period, count int32, adjust quote.AdjustType) ([]*quote.Candlestick, error)
+	Intraday(ctx context.Context, symbol string) ([]*quote.IntradayLine, error)
 	WatchedGroups(ctx context.Context) ([]*quote.WatchedGroup, error)
 	CapitalFlow(ctx context.Context, symbol string) ([]quote.CapitalFlowLine, error)
 	CapitalDistribution(ctx context.Context, symbol string) (quote.CapitalDistribution, error)
@@ -181,6 +182,35 @@ func (l *Longbridge) CapitalFlow(ctx context.Context, symbol string) (CapitalFlo
 		Symbol: symbol, Currency: CurrencyOf(symbol), AsOf: time.Unix(dist.Timestamp, 0).UTC(),
 		Flow: flow, In: in, Out: out,
 	}, nil
+}
+
+// Intraday implements Provider: the previous close comes from the quote, the minute line from Intraday.
+// No lines before the first trade is an empty line, not ErrNotFound.
+func (l *Longbridge) Intraday(ctx context.Context, symbol string) (Intraday, error) {
+	q, err := l.Quote(ctx, symbol)
+	if err != nil {
+		return Intraday{}, err
+	}
+	lines, err := l.quotes.Intraday(ctx, symbol)
+	if err != nil {
+		return Intraday{}, fmt.Errorf("longbridge intraday %s: %w", symbol, err)
+	}
+	points := make([]IntradayPoint, 0, len(lines))
+	for _, line := range lines {
+		if line == nil {
+			continue
+		}
+		price, err := toMoney(line.Price)
+		if err != nil {
+			return Intraday{}, fmt.Errorf("longbridge intraday %s: %w", symbol, err)
+		}
+		avg, err := toMoney(line.AvgPrice)
+		if err != nil {
+			return Intraday{}, fmt.Errorf("longbridge intraday %s: %w", symbol, err)
+		}
+		points = append(points, IntradayPoint{Time: time.Unix(line.Timestamp, 0).UTC(), Price: price, AvgPrice: avg, Volume: line.Volume})
+	}
+	return Intraday{Symbol: symbol, Currency: q.Currency, PrevClose: q.Price.Sub(q.Change), Points: points}, nil
 }
 
 func toBuckets(c quote.Capital) (CapitalBuckets, error) {

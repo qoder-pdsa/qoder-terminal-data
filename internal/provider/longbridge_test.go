@@ -15,6 +15,7 @@ type fakeQuotes struct {
 	quotes []*quote.SecurityQuote
 	sticks []*quote.Candlestick
 	groups []*quote.WatchedGroup
+	lines  []*quote.IntradayLine
 	flow   []quote.CapitalFlowLine
 	dist   quote.CapitalDistribution
 	err    error
@@ -24,6 +25,10 @@ type fakeQuotes struct {
 func (f *fakeQuotes) Quote(_ context.Context, symbols []string) ([]*quote.SecurityQuote, error) {
 	f.asked = append(f.asked, symbols...)
 	return f.quotes, f.err
+}
+
+func (f *fakeQuotes) Intraday(context.Context, string) ([]*quote.IntradayLine, error) {
+	return f.lines, f.err
 }
 
 func (f *fakeQuotes) WatchedGroups(context.Context) ([]*quote.WatchedGroup, error) {

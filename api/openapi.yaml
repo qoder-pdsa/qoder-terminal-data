@@ -138,6 +138,20 @@ paths:
               schema: { $ref: "#/components/schemas/CapitalFlow" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/intraday/{symbol}:
+    get:
+      operationId: getIntraday
+      summary: Intraday minute line
+      parameters:
+        - $ref: "#/components/parameters/Symbol"
+      responses:
+        "200":
+          description: Minute prices of the current session; `points` is empty before the first trade
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Intraday" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   parameters:
     Range:
@@ -270,3 +284,24 @@ components:
               allOf:
                 - $ref: "#/components/schemas/CapitalBuckets"
               description: in minus out per bucket, computed server side
+    Intraday:
+      type: object
+      required: [symbol, currency, prevClose, points]
+      properties:
+        symbol: { type: string }
+        currency: { type: string, enum: [HKD, USD, CNY] }
+        prevClose:
+          allOf:
+            - $ref: "#/components/schemas/Decimal"
+          description: Previous close, the baseline the intraday chart is drawn against
+        points:
+          type: array
+          description: Ascending minute points of the current session
+          items:
+            type: object
+            required: [time, price, avgPrice, volume]
+            properties:
+              time: { type: string, format: date-time }
+              price: { $ref: "#/components/schemas/Decimal" }
+              avgPrice: { $ref: "#/components/schemas/Decimal" }
+              volume: { type: integer, format: int64 }

@@ -40,7 +40,7 @@ func TestCachedHistoryCoalescesConcurrentCalls(t *testing.T) {
 	up := newCounting()
 	up.started = make(chan struct{}, 10)
 	up.release = make(chan struct{})
-	cached := NewCached(up, time.Minute)
+	cached := NewCached(up, time.Minute, 10*time.Second)
 
 	const callers = 6
 	results := make([][]Candle, callers)
@@ -78,8 +78,8 @@ func TestCachedHistoryCoalescesConcurrentCalls(t *testing.T) {
 func TestCachedHistoryServesFromCacheUntilTTL(t *testing.T) {
 	up := newCounting()
 	now := time.Date(2026, 9, 24, 9, 30, 0, 0, time.UTC)
-	cached := NewCached(up, time.Minute)
-	cached.now = func() time.Time { return now }
+	cached := NewCached(up, time.Minute, 10*time.Second)
+	cached.history.now = func() time.Time { return now }
 	ctx := context.Background()
 
 	for range 3 {
@@ -102,7 +102,7 @@ func TestCachedHistoryServesFromCacheUntilTTL(t *testing.T) {
 
 func TestCachedHistoryKeysBySymbolAndDays(t *testing.T) {
 	up := newCounting()
-	cached := NewCached(up, time.Minute)
+	cached := NewCached(up, time.Minute, 10*time.Second)
 	ctx := context.Background()
 	for _, k := range []struct {
 		symbol string
@@ -121,7 +121,7 @@ func TestCachedHistoryDoesNotCacheErrors(t *testing.T) {
 	boom := errors.New("request rate limit")
 	up := newCounting()
 	up.errs = []error{boom}
-	cached := NewCached(up, time.Minute)
+	cached := NewCached(up, time.Minute, 10*time.Second)
 	ctx := context.Background()
 
 	if _, err := cached.History(ctx, "700.HK", 63); !errors.Is(err, boom) {
@@ -137,7 +137,7 @@ func TestCachedHistoryDoesNotCacheErrors(t *testing.T) {
 }
 
 func TestCachedHistoryReturnsCopies(t *testing.T) {
-	cached := NewCached(newCounting(), time.Minute)
+	cached := NewCached(newCounting(), time.Minute, 10*time.Second)
 	ctx := context.Background()
 	first, err := cached.History(ctx, "700.HK", 63)
 	if err != nil {
@@ -155,7 +155,7 @@ func TestCachedHistoryReturnsCopies(t *testing.T) {
 
 func TestCachedHistoryCancelledCallerDoesNotPoisonCache(t *testing.T) {
 	up := newCounting()
-	cached := NewCached(up, time.Minute)
+	cached := NewCached(up, time.Minute, 10*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // the shared upstream fetch must not be tied to one caller's context
 	_, _ = cached.History(ctx, "700.HK", 63)
@@ -170,12 +170,46 @@ func TestCachedHistoryCancelledCallerDoesNotPoisonCache(t *testing.T) {
 }
 
 func TestCachedPassesThroughQuote(t *testing.T) {
-	cached := NewCached(newCounting(), time.Minute)
+	cached := NewCached(newCounting(), time.Minute, 10*time.Second)
 	q, err := cached.Quote(context.Background(), "700.HK")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if q.Symbol != "700.HK" {
 		t.Errorf("symbol = %q", q.Symbol)
+	}
+}
+
+func (c *countingProvider) Intraday(ctx context.Context, symbol string) (Intraday, error) {
+	c.calls.Add(1)
+	return c.Provider.Intraday(ctx, symbol)
+}
+
+func TestCachedIntradayHasItsOwnShortTTL(t *testing.T) {
+	up := newCounting()
+	now := time.Date(2026, 9, 25, 3, 0, 0, 0, time.UTC)
+	cached := NewCached(up, time.Minute, 10*time.Second)
+	cached.intraday.now = func() time.Time { return now }
+	ctx := context.Background()
+	for range 3 {
+		if _, err := cached.Intraday(ctx, "700.HK"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := up.calls.Load(); got != 1 {
+		t.Fatalf("upstream calls within TTL = %d, want 1", got)
+	}
+	now = now.Add(11 * time.Second)
+	if _, err := cached.Intraday(ctx, "700.HK"); err != nil {
+		t.Fatal(err)
+	}
+	if got := up.calls.Load(); got != 2 {
+		t.Errorf("upstream calls after 11s = %d, want 2", got)
+	}
+	if _, err := cached.History(ctx, "700.HK", 63); err != nil {
+		t.Fatal(err)
+	}
+	if got := up.calls.Load(); got != 3 {
+		t.Errorf("history and intraday must not share cache entries; calls = %d", got)
 	}
 }

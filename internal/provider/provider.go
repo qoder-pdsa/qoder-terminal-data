@@ -91,6 +91,22 @@ type CapitalFlow struct {
 	In, Out  CapitalBuckets
 }
 
+// IntradayPoint is one minute of the current session.
+type IntradayPoint struct {
+	Time     time.Time
+	Price    money.Decimal
+	AvgPrice money.Decimal
+	Volume   int64
+}
+
+// Intraday is the minute line of the current session; Points is empty before the first trade.
+type Intraday struct {
+	Symbol    string
+	Currency  string
+	PrevClose money.Decimal
+	Points    []IntradayPoint
+}
+
 // Provider is the interface every data source must implement.
 type Provider interface {
 	Quote(ctx context.Context, symbol string) (Quote, error)
@@ -100,4 +116,5 @@ type Provider interface {
 	News(ctx context.Context, symbol string, limit int) ([]NewsItem, error)
 	Watchlists(ctx context.Context) ([]Watchlist, error)
 	CapitalFlow(ctx context.Context, symbol string) (CapitalFlow, error)
+	Intraday(ctx context.Context, symbol string) (Intraday, error)
 }
