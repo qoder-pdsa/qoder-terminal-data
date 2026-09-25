@@ -9,16 +9,14 @@ import (
 // fetchTimeout bounds the shared upstream fetch, which is detached from any single caller's context.
 const fetchTimeout = 15 * time.Second
 
-// Cached wraps a Provider so that concurrent and repeated History calls for the same (symbol, days)
-// share one upstream fetch and reuse the result for a TTL. The graph panel asks for history plus
-// one indicator per window, and `ASK compare` opens several panels at once, so without this the
-// same daily candles were requested from Longbridge six times in a burst and hit its rate limit.
+// Cached wraps a Provider so that concurrent and repeated calls for the same key share one upstream
+// fetch and reuse the result for a TTL. The graph panel asks for history plus one indicator per window,
+// `ASK compare` opens several panels at once, and every Q panel re-polls its intraday line, so
+// without this the same data was requested from Longbridge in bursts and hit its rate limit.
 type Cached struct {
 	Provider
-	ttl     time.Duration
-	now     func() time.Time
-	mu      sync.Mutex
-	entries map[historyKey]*historyEntry
+	history  *flightCache[historyKey, []Candle]
+	intraday *flightCache[string, Intraday]
 }
 
 type historyKey struct {
@@ -26,72 +24,107 @@ type historyKey struct {
 	days   int
 }
 
-// historyEntry is one in-flight or completed fetch; done is closed once candles/err are set.
-type historyEntry struct {
+// NewCached wraps p; History results are reused for historyTTL, Intraday results for intradayTTL.
+func NewCached(p Provider, historyTTL, intradayTTL time.Duration) *Cached {
+	return &Cached{
+		Provider: p,
+		history:  newFlightCache[historyKey, []Candle](historyTTL),
+		intraday: newFlightCache[string, Intraday](intradayTTL),
+	}
+}
+
+// History implements Provider; callers get a copy so the cached slice is never mutated.
+func (c *Cached) History(ctx context.Context, symbol string, days int) ([]Candle, error) {
+	candles, err := c.history.get(ctx, historyKey{symbol, days}, func(ctx context.Context) ([]Candle, error) {
+		return c.Provider.History(ctx, symbol, days)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append([]Candle(nil), candles...), nil
+}
+
+// Intraday implements Provider with a short TTL, since the line gains a point every minute.
+func (c *Cached) Intraday(ctx context.Context, symbol string) (Intraday, error) {
+	in, err := c.intraday.get(ctx, symbol, func(ctx context.Context) (Intraday, error) {
+		return c.Provider.Intraday(ctx, symbol)
+	})
+	if err != nil {
+		return Intraday{}, err
+	}
+	return Intraday{Symbol: in.Symbol, Currency: in.Currency, PrevClose: in.PrevClose, Points: append([]IntradayPoint(nil), in.Points...)}, nil
+}
+
+// flightCache coalesces concurrent fetches per key and keeps successful results for ttl.
+type flightCache[K comparable, V any] struct {
+	ttl     time.Duration
+	now     func() time.Time
+	mu      sync.Mutex
+	entries map[K]*flightEntry[V]
+}
+
+// flightEntry is one in-flight or completed fetch; done is closed once value/err are set.
+type flightEntry[V any] struct {
 	done    chan struct{}
-	candles []Candle
+	value   V
 	err     error
 	expires time.Time
 }
 
-// NewCached wraps p; History results are reused for ttl.
-func NewCached(p Provider, ttl time.Duration) *Cached {
-	return &Cached{Provider: p, ttl: ttl, now: time.Now, entries: map[historyKey]*historyEntry{}}
+func newFlightCache[K comparable, V any](ttl time.Duration) *flightCache[K, V] {
+	return &flightCache[K, V]{ttl: ttl, now: time.Now, entries: map[K]*flightEntry[V]{}}
 }
 
-// History implements Provider. Callers that arrive while a fetch is in flight wait for it instead of
-// starting their own; errors are never cached, so the next caller retries upstream.
-func (c *Cached) History(ctx context.Context, symbol string, days int) ([]Candle, error) {
-	key := historyKey{symbol, days}
-	entry, owner := c.acquire(key)
+// get returns the cached value, waits for an in-flight fetch, or performs the fetch itself.
+// Errors are never cached, so the next caller retries upstream.
+func (f *flightCache[K, V]) get(ctx context.Context, key K, fetch func(context.Context) (V, error)) (V, error) {
+	entry, owner := f.acquire(key)
 	if owner {
-		c.fetch(key, entry)
+		f.fetch(key, entry, fetch)
 	}
 	select {
 	case <-entry.done:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		var zero V
+		return zero, ctx.Err()
 	}
-	if entry.err != nil {
-		return nil, entry.err
-	}
-	return append([]Candle(nil), entry.candles...), nil
+	return entry.value, entry.err
 }
 
 // acquire returns the entry to wait on and whether this caller must perform the fetch.
-func (c *Cached) acquire(key historyKey) (*historyEntry, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if entry, ok := c.entries[key]; ok && c.usable(entry) {
+func (f *flightCache[K, V]) acquire(key K) (*flightEntry[V], bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if entry, ok := f.entries[key]; ok && f.usable(entry) {
 		return entry, false
 	}
-	entry := &historyEntry{done: make(chan struct{})}
-	c.entries[key] = entry
+	entry := &flightEntry[V]{done: make(chan struct{})}
+	f.entries[key] = entry
 	return entry, true
 }
 
 // usable reports whether an entry is still in flight or completed successfully within its TTL.
-func (c *Cached) usable(entry *historyEntry) bool {
+func (f *flightCache[K, V]) usable(entry *flightEntry[V]) bool {
 	select {
 	case <-entry.done:
-		return entry.err == nil && c.now().Before(entry.expires)
+		return entry.err == nil && f.now().Before(entry.expires)
 	default:
 		return true
 	}
 }
 
 // fetch performs the shared upstream call with its own timeout, detached from any caller's cancellation.
-func (c *Cached) fetch(key historyKey, entry *historyEntry) {
+func (f *flightCache[K, V]) fetch(key K, entry *flightEntry[V], fetch func(context.Context) (V, error)) {
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 	defer cancel()
-	entry.candles, entry.err = c.Provider.History(ctx, key.symbol, key.days)
-	entry.expires = c.now().Add(c.ttl)
+	entry.value, entry.err = fetch(ctx)
+	entry.expires = f.now().Add(f.ttl)
 	close(entry.done)
 	if entry.err != nil {
-		c.mu.Lock()
-		if c.entries[key] == entry {
-			delete(c.entries, key)
+		f.mu.Lock()
+		if f.entries[key] == entry {
+			delete(f.entries, key)
 		}
-		c.mu.Unlock()
+		f.mu.Unlock()
 	}
 }

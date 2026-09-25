@@ -173,3 +173,37 @@ func (m *Mock) CapitalFlow(_ context.Context, symbol string) (CapitalFlow, error
 		Out:      CapitalBuckets{Large: bucket(11), Medium: bucket(13), Small: bucket(17)},
 	}, nil
 }
+
+// Hong Kong session in UTC: 09:30-12:00 and 13:00-16:00 HKT.
+var hkSessions = [][2]int{{1*60 + 30, 4 * 60}, {5 * 60, 8 * 60}}
+
+// Intraday implements Provider: a deterministic minute line from the open up to now, skipping lunch,
+// oscillating around the previous close so the chart shows both sides of the baseline.
+func (m *Mock) Intraday(_ context.Context, symbol string) (Intraday, error) {
+	if err := m.ensure(symbol); err != nil {
+		return Intraday{}, err
+	}
+	s := seed(symbol)
+	prev := money.FromUnits(closeUnits(symbol, 1))
+	now := m.Now().UTC()
+	day := now.Truncate(24 * time.Hour)
+	nowMinute := int(now.Sub(day) / time.Minute)
+	points := make([]IntradayPoint, 0, 332)
+	var sumUnits, sumVolume int64
+	for _, session := range hkSessions {
+		for minute := session[0]; minute <= session[1] && minute <= nowMinute; minute++ {
+			wave := (s + int64(minute)*7919) % 20_000 // ±1.0000 around the previous close
+			price := money.FromUnits(prev.Units() + wave - 10_000)
+			volume := 10_000 + (s+int64(minute)*104_729)%90_000
+			sumUnits += price.Units() * volume
+			sumVolume += volume
+			points = append(points, IntradayPoint{
+				Time:     day.Add(time.Duration(minute) * time.Minute),
+				Price:    price,
+				AvgPrice: money.FromUnits(sumUnits / sumVolume),
+				Volume:   volume,
+			})
+		}
+	}
+	return Intraday{Symbol: symbol, Currency: CurrencyOf(symbol), PrevClose: prev, Points: points}, nil
+}

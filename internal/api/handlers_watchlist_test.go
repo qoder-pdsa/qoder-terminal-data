@@ -96,3 +96,34 @@ func TestCapitalFlowShape(t *testing.T) {
 		t.Error("net.large equals in.large; expected in minus out")
 	}
 }
+
+func TestIntradayShape(t *testing.T) {
+	ts := newTestServer() // mock clock is 2026-09-17 00:00Z, before the open: points must be [] not null
+	defer ts.Close()
+	var in struct {
+		Symbol    string `json:"symbol"`
+		Currency  string `json:"currency"`
+		PrevClose string `json:"prevClose"`
+		Points    []struct {
+			Time, Price, AvgPrice string
+			Volume                int64
+		} `json:"points"`
+	}
+	getJSON(t, ts.URL+"/v1/intraday/700.HK", &in)
+	if in.Symbol != "700.HK" || in.Currency != "HKD" || !decimalPattern.MatchString(in.PrevClose) {
+		t.Fatalf("header: %+v", in)
+	}
+	if in.Points == nil {
+		t.Fatal("points must serialize as [] before the open")
+	}
+	resp, err := http.Get(ts.URL + "/v1/intraday/700.HK")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var raw map[string]json.RawMessage
+	_ = json.NewDecoder(resp.Body).Decode(&raw)
+	if string(raw["points"]) != "[]" {
+		t.Errorf("points json = %s, want []", raw["points"])
+	}
+}

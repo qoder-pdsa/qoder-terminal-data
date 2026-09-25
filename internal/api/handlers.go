@@ -46,6 +46,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/quotes", s.quotes)
 	mux.HandleFunc("GET /v1/watchlists", s.watchlists)
 	mux.HandleFunc("GET /v1/capital-flow/{symbol}", s.capitalFlow)
+	mux.HandleFunc("GET /v1/intraday/{symbol}", s.intraday)
 	mux.HandleFunc("GET /v1/history/{symbol}", s.history)
 	mux.HandleFunc("GET /v1/news", s.news)
 	mux.HandleFunc("GET /v1/indicators/{symbol}", s.indicator)
@@ -152,6 +153,27 @@ func (s *Server) capitalFlow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"symbol": cf.Symbol, "currency": cf.Currency, "asOf": cf.AsOf.Format(time.RFC3339), "flow": flow,
 		"distribution": map[string]any{"in": bucketsBody(cf.In), "out": bucketsBody(cf.Out), "net": bucketsBody(cf.In.Sub(cf.Out))},
+	})
+}
+
+func (s *Server) intraday(w http.ResponseWriter, r *http.Request) {
+	symbol, ok := s.symbol(w, r)
+	if !ok {
+		return
+	}
+	in, err := s.Provider.Intraday(r.Context(), symbol)
+	if err != nil {
+		s.providerError(w, err)
+		return
+	}
+	points := make([]map[string]any, 0, len(in.Points))
+	for _, p := range in.Points {
+		points = append(points, map[string]any{
+			"time": p.Time.Format(time.RFC3339), "price": p.Price.String(), "avgPrice": p.AvgPrice.String(), "volume": p.Volume,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"symbol": in.Symbol, "currency": in.Currency, "prevClose": in.PrevClose.String(), "points": points,
 	})
 }
 
