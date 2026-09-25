@@ -14,14 +14,31 @@ import (
 type fakeQuotes struct {
 	quotes []*quote.SecurityQuote
 	sticks []*quote.Candlestick
+	groups []*quote.WatchedGroup
+	flow   []quote.CapitalFlowLine
+	dist   quote.CapitalDistribution
 	err    error
+	asked  []string // symbols passed to Quote
 }
 
-func (f fakeQuotes) Quote(context.Context, []string) ([]*quote.SecurityQuote, error) {
+func (f *fakeQuotes) Quote(_ context.Context, symbols []string) ([]*quote.SecurityQuote, error) {
+	f.asked = append(f.asked, symbols...)
 	return f.quotes, f.err
 }
 
-func (f fakeQuotes) Candlesticks(context.Context, string, quote.Period, int32, quote.AdjustType) ([]*quote.Candlestick, error) {
+func (f *fakeQuotes) WatchedGroups(context.Context) ([]*quote.WatchedGroup, error) {
+	return f.groups, f.err
+}
+
+func (f *fakeQuotes) CapitalFlow(context.Context, string) ([]quote.CapitalFlowLine, error) {
+	return f.flow, f.err
+}
+
+func (f *fakeQuotes) CapitalDistribution(context.Context, string) (quote.CapitalDistribution, error) {
+	return f.dist, f.err
+}
+
+func (f *fakeQuotes) Candlesticks(context.Context, string, quote.Period, int32, quote.AdjustType) ([]*quote.Candlestick, error) {
 	return f.sticks, f.err
 }
 
@@ -35,7 +52,7 @@ func dec(s string) *decimal.Decimal {
 }
 
 func TestLongbridgeQuoteMapsDecimals(t *testing.T) {
-	lb := &Longbridge{quotes: fakeQuotes{quotes: []*quote.SecurityQuote{{
+	lb := &Longbridge{quotes: &fakeQuotes{quotes: []*quote.SecurityQuote{{
 		Symbol: "700.HK", LastDone: dec("388.200"), PrevClose: dec("380.000"), Timestamp: 1_758_000_000,
 	}}}}
 	q, err := lb.Quote(context.Background(), "700.HK")
@@ -51,7 +68,7 @@ func TestLongbridgeQuoteMapsDecimals(t *testing.T) {
 }
 
 func TestLongbridgeQuoteEmptyIsNotFound(t *testing.T) {
-	lb := &Longbridge{quotes: fakeQuotes{}}
+	lb := &Longbridge{quotes: &fakeQuotes{}}
 	if _, err := lb.Quote(context.Background(), "0000.HK"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
@@ -59,14 +76,14 @@ func TestLongbridgeQuoteEmptyIsNotFound(t *testing.T) {
 
 func TestLongbridgeQuoteUpstreamError(t *testing.T) {
 	upstream := errors.New("token expired")
-	lb := &Longbridge{quotes: fakeQuotes{err: upstream}}
+	lb := &Longbridge{quotes: &fakeQuotes{err: upstream}}
 	if _, err := lb.Quote(context.Background(), "700.HK"); !errors.Is(err, upstream) || errors.Is(err, ErrNotFound) {
 		t.Errorf("want wrapped upstream error, got %v", err)
 	}
 }
 
 func TestLongbridgeHistory(t *testing.T) {
-	lb := &Longbridge{quotes: fakeQuotes{sticks: []*quote.Candlestick{
+	lb := &Longbridge{quotes: &fakeQuotes{sticks: []*quote.Candlestick{
 		{Open: dec("1"), High: dec("2"), Low: dec("0.5"), Close: dec("1.5"), Volume: 10, Timestamp: 1_758_000_000},
 		{Open: dec("1.5"), High: nil, Low: dec("1"), Close: dec("1.2"), Volume: 10, Timestamp: 1_758_086_400},
 	}}}
@@ -97,7 +114,7 @@ func TestLongbridgeNewsSkipsItemsWithoutURLAndRespectsLimit(t *testing.T) {
 func TestLongbridgeDailyCandleUsesExchangeTradingDate(t *testing.T) {
 	// Longbridge daily candles are stamped at exchange-local midnight: 2026-09-17 00:00 HKT = 2026-09-16T16:00:00Z
 	hkMidnight := time.Date(2026, 9, 17, 0, 0, 0, 0, time.FixedZone("HKT", 8*3600))
-	lb := &Longbridge{quotes: fakeQuotes{sticks: []*quote.Candlestick{
+	lb := &Longbridge{quotes: &fakeQuotes{sticks: []*quote.Candlestick{
 		{Open: dec("426.2"), High: dec("431"), Low: dec("425"), Close: dec("426"), Volume: 1, Timestamp: hkMidnight.Unix()},
 	}}}
 	candles, err := lb.History(context.Background(), "700.HK", 1)

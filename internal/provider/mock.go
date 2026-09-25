@@ -117,3 +117,55 @@ func (m *Mock) News(_ context.Context, symbol string, limit int) ([]NewsItem, er
 	}
 	return items, nil
 }
+
+// demoWatchlist is the mock's single watchlist group, in a stable display order.
+var demoWatchlist = []string{"700.HK", "9988.HK", "3690.HK", "1810.HK", "1211.HK", "2800.HK"}
+
+// capitalFlowMinutes is how many one-minute points the mock capital flow covers.
+const capitalFlowMinutes = 60
+
+// Quotes implements Provider.
+func (m *Mock) Quotes(ctx context.Context, symbols []string) ([]Quote, error) {
+	quotes := make([]Quote, 0, len(symbols))
+	for _, symbol := range symbols {
+		q, err := m.Quote(ctx, symbol)
+		if err != nil {
+			return nil, err
+		}
+		quotes = append(quotes, q)
+	}
+	return quotes, nil
+}
+
+// Watchlists implements Provider with one demo group of the known symbols.
+func (m *Mock) Watchlists(context.Context) ([]Watchlist, error) {
+	symbols := make([]WatchedSymbol, 0, len(demoWatchlist))
+	for _, s := range demoWatchlist {
+		symbols = append(symbols, WatchedSymbol{Symbol: s, Name: knownSymbols[s]})
+	}
+	return []Watchlist{{ID: "demo", Name: "Demo", Symbols: symbols}}, nil
+}
+
+// CapitalFlow implements Provider: deterministic per-minute net inflow ending now, with both signs.
+func (m *Mock) CapitalFlow(_ context.Context, symbol string) (CapitalFlow, error) {
+	if err := m.ensure(symbol); err != nil {
+		return CapitalFlow{}, err
+	}
+	s := seed(symbol)
+	end := m.Now().UTC().Truncate(time.Minute)
+	flow := make([]CapitalFlowPoint, 0, capitalFlowMinutes)
+	for i := capitalFlowMinutes - 1; i >= 0; i-- {
+		wave := (s + int64(i)*104_729) % 2_000_000 // 0 ~ 1,999,999
+		amount := (wave - 1_000_000) * 10_000      // ±1,000.0000 × 10,000 → ±10,000,000.0000
+		flow = append(flow, CapitalFlowPoint{Time: end.Add(-time.Duration(i) * time.Minute), Inflow: money.FromUnits(amount)})
+	}
+	bucket := func(k int64) money.Decimal { return money.FromUnits((s*k%5_000_000 + 1_000_000) * 10_000) }
+	return CapitalFlow{
+		Symbol:   symbol,
+		Currency: CurrencyOf(symbol),
+		AsOf:     end,
+		Flow:     flow,
+		In:       CapitalBuckets{Large: bucket(3), Medium: bucket(5), Small: bucket(7)},
+		Out:      CapitalBuckets{Large: bucket(11), Medium: bucket(13), Small: bucket(17)},
+	}, nil
+}

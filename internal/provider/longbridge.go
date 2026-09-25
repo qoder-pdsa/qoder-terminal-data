@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	_ "time/tzdata" // distroless images ship no tz database; embed it to support America/New_York
@@ -23,6 +24,9 @@ const maxCandles = 1000
 type quoteAPI interface {
 	Quote(ctx context.Context, symbols []string) ([]*quote.SecurityQuote, error)
 	Candlesticks(ctx context.Context, symbol string, period quote.Period, count int32, adjust quote.AdjustType) ([]*quote.Candlestick, error)
+	WatchedGroups(ctx context.Context) ([]*quote.WatchedGroup, error)
+	CapitalFlow(ctx context.Context, symbol string) ([]quote.CapitalFlowLine, error)
+	CapitalDistribution(ctx context.Context, symbol string) (quote.CapitalDistribution, error)
 }
 
 // newsAPI is the subset of Longbridge ContentContext used by this service.
@@ -66,14 +70,41 @@ func (l *Longbridge) Close() error {
 
 // Quote implements Provider.
 func (l *Longbridge) Quote(ctx context.Context, symbol string) (Quote, error) {
-	quotes, err := l.quotes.Quote(ctx, []string{symbol})
+	quotes, err := l.Quotes(ctx, []string{symbol})
 	if err != nil {
-		return Quote{}, fmt.Errorf("longbridge quote %s: %w", symbol, err)
+		return Quote{}, err
 	}
-	if len(quotes) == 0 || quotes[0] == nil || quotes[0].LastDone == nil {
-		return Quote{}, fmt.Errorf("longbridge quote %s: %w", symbol, ErrNotFound)
+	return quotes[0], nil
+}
+
+// Quotes implements Provider with one upstream call; a symbol missing from the reply is ErrNotFound.
+func (l *Longbridge) Quotes(ctx context.Context, symbols []string) ([]Quote, error) {
+	raw, err := l.quotes.Quote(ctx, symbols)
+	if err != nil {
+		return nil, fmt.Errorf("longbridge quote %s: %w", strings.Join(symbols, ","), err)
 	}
-	q := quotes[0]
+	bySymbol := make(map[string]*quote.SecurityQuote, len(raw))
+	for _, q := range raw {
+		if q != nil && q.LastDone != nil {
+			bySymbol[q.Symbol] = q
+		}
+	}
+	quotes := make([]Quote, 0, len(symbols))
+	for _, symbol := range symbols {
+		q, ok := bySymbol[symbol]
+		if !ok {
+			return nil, fmt.Errorf("longbridge quote %s: %w", symbol, ErrNotFound)
+		}
+		mapped, err := toQuote(symbol, q)
+		if err != nil {
+			return nil, err
+		}
+		quotes = append(quotes, mapped)
+	}
+	return quotes, nil
+}
+
+func toQuote(symbol string, q *quote.SecurityQuote) (Quote, error) {
 	price, err := toMoney(q.LastDone)
 	if err != nil {
 		return Quote{}, err
@@ -91,6 +122,79 @@ func (l *Longbridge) Quote(ctx context.Context, symbol string) (Quote, error) {
 		Currency:      CurrencyOf(symbol),
 		AsOf:          time.Unix(q.Timestamp, 0).UTC(),
 	}, nil
+}
+
+// Watchlists implements Provider from the account's watched groups.
+func (l *Longbridge) Watchlists(ctx context.Context) ([]Watchlist, error) {
+	groups, err := l.quotes.WatchedGroups(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("longbridge watched groups: %w", err)
+	}
+	lists := make([]Watchlist, 0, len(groups))
+	for _, g := range groups {
+		if g == nil {
+			continue
+		}
+		symbols := make([]WatchedSymbol, 0, len(g.Securites))
+		for _, sec := range g.Securites {
+			if sec != nil && sec.Symbol != "" {
+				symbols = append(symbols, WatchedSymbol{Symbol: sec.Symbol, Name: sec.Name})
+			}
+		}
+		lists = append(lists, Watchlist{ID: strconv.FormatInt(g.Id, 10), Name: g.Name, Symbols: symbols})
+	}
+	return lists, nil
+}
+
+// CapitalFlow implements Provider from the intraday flow lines and the order-size distribution.
+func (l *Longbridge) CapitalFlow(ctx context.Context, symbol string) (CapitalFlow, error) {
+	lines, err := l.quotes.CapitalFlow(ctx, symbol)
+	if err != nil {
+		return CapitalFlow{}, fmt.Errorf("longbridge capital flow %s: %w", symbol, err)
+	}
+	if len(lines) == 0 {
+		return CapitalFlow{}, fmt.Errorf("longbridge capital flow %s: %w", symbol, ErrNotFound)
+	}
+	dist, err := l.quotes.CapitalDistribution(ctx, symbol)
+	if err != nil {
+		return CapitalFlow{}, fmt.Errorf("longbridge capital distribution %s: %w", symbol, err)
+	}
+	flow := make([]CapitalFlowPoint, 0, len(lines))
+	for _, line := range lines {
+		inflow, err := toMoney(line.Inflow)
+		if err != nil {
+			return CapitalFlow{}, fmt.Errorf("longbridge capital flow %s: %w", symbol, err)
+		}
+		flow = append(flow, CapitalFlowPoint{Time: time.Unix(line.Timestamp, 0).UTC(), Inflow: inflow})
+	}
+	in, err := toBuckets(dist.CapitalIn)
+	if err != nil {
+		return CapitalFlow{}, fmt.Errorf("longbridge capital distribution %s: %w", symbol, err)
+	}
+	out, err := toBuckets(dist.CapitalOut)
+	if err != nil {
+		return CapitalFlow{}, fmt.Errorf("longbridge capital distribution %s: %w", symbol, err)
+	}
+	return CapitalFlow{
+		Symbol: symbol, Currency: CurrencyOf(symbol), AsOf: time.Unix(dist.Timestamp, 0).UTC(),
+		Flow: flow, In: in, Out: out,
+	}, nil
+}
+
+func toBuckets(c quote.Capital) (CapitalBuckets, error) {
+	large, err := toMoney(c.Large)
+	if err != nil {
+		return CapitalBuckets{}, err
+	}
+	medium, err := toMoney(c.Medium)
+	if err != nil {
+		return CapitalBuckets{}, err
+	}
+	small, err := toMoney(c.Small)
+	if err != nil {
+		return CapitalBuckets{}, err
+	}
+	return CapitalBuckets{Large: large, Medium: medium, Small: small}, nil
 }
 
 // History implements Provider, returning forward-adjusted daily candles in ascending time order.
