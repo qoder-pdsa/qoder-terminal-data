@@ -88,6 +88,53 @@ paths:
               schema: { $ref: "#/components/schemas/IndicatorSeries" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/quotes:
+    get:
+      operationId: listQuotes
+      summary: Batch quotes
+      description: One upstream call for a whole watchlist; symbols are comma-separated, at most 20
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          schema: { type: string, example: "700.HK,9988.HK" }
+      responses:
+        "200":
+          description: Quotes in the requested order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Quote" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/watchlists:
+    get:
+      operationId: listWatchlists
+      summary: List watchlist groups
+      description: With the longbridge provider these are the account's watched groups; mock returns one demo group
+      responses:
+        "200":
+          description: Watchlist groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Watchlist" }
+  /v1/capital-flow/{symbol}:
+    get:
+      operationId: getCapitalFlow
+      summary: Intraday capital flow
+      parameters:
+        - $ref: "#/components/parameters/Symbol"
+      responses:
+        "200":
+          description: Per-minute net inflow and the large / medium / small order distribution
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CapitalFlow" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   parameters:
     Range:
@@ -173,3 +220,50 @@ components:
       properties:
         code: { type: string }
         message: { type: string }
+    Watchlist:
+      type: object
+      required: [id, name, symbols]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        symbols:
+          type: array
+          items:
+            type: object
+            required: [symbol, name]
+            properties:
+              symbol: { type: string }
+              name: { type: string }
+    CapitalBuckets:
+      type: object
+      required: [large, medium, small]
+      properties:
+        large: { $ref: "#/components/schemas/Decimal" }
+        medium: { $ref: "#/components/schemas/Decimal" }
+        small: { $ref: "#/components/schemas/Decimal" }
+    CapitalFlow:
+      type: object
+      required: [symbol, currency, asOf, flow, distribution]
+      properties:
+        symbol: { type: string }
+        currency: { type: string, enum: [HKD, USD, CNY] }
+        asOf: { type: string, format: date-time }
+        flow:
+          type: array
+          description: Net inflow per minute in ascending time order; negative means outflow
+          items:
+            type: object
+            required: [time, inflow]
+            properties:
+              time: { type: string, format: date-time }
+              inflow: { $ref: "#/components/schemas/Decimal" }
+        distribution:
+          type: object
+          required: [in, out, net]
+          properties:
+            in: { $ref: "#/components/schemas/CapitalBuckets" }
+            out: { $ref: "#/components/schemas/CapitalBuckets" }
+            net:
+              allOf:
+                - $ref: "#/components/schemas/CapitalBuckets"
+              description: in minus out per bucket, computed server side

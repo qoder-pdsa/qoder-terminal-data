@@ -20,7 +20,7 @@ curl "localhost:8081/v1/indicators/700.HK?kind=rsi&window=14"
 | `DATA_PROVIDER` | Status | Notes |
 |---|---|---|
 | `mock` | ✅ | Deterministic fake data (Tencent, Alibaba, Meituan, Xiaomi, BYD, Tracker Fund) for tests and offline fallback |
-| `longbridge` | ✅ | Quotes, forward-adjusted daily candles, and news |
+| `longbridge` | ✅ | Quotes (single and batch), forward-adjusted daily candles, news, the account's watchlist groups, intraday capital flow |
 | `replay` | 🚧 backlog | Replays recorded intraday data so demos are reproducible |
 
 Whatever the provider, `/v1/history` and `/v1/indicators` share daily candles through `provider.Cached`: concurrent
